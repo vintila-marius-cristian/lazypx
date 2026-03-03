@@ -71,3 +71,13 @@ func (c *Client) WatchTask(ctx context.Context, node, upid string, ch chan<- Tas
 		}
 	}
 }
+
+// GetClusterTasks returns the most recent cluster-wide tasks (like the Proxmox UI bottom pane).
+func (c *Client) GetClusterTasks(ctx context.Context) ([]Task, error) {
+	var out APIResponse[[]Task]
+	// limit to 50 recent tasks across the cluster to avoid huge payloads
+	if err := c.get(ctx, "/cluster/tasks?limit=50", &out); err != nil {
+		return nil, fmt.Errorf("get cluster tasks: %w", err)
+	}
+	return out.Data, nil
+}

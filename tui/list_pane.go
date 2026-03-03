@@ -58,12 +58,16 @@ func (m *ListPane) clampCursor() {
 func (m *ListPane) MoveUp() {
 	if m.Cursor > 0 {
 		m.Cursor--
+	} else if len(m.Items) > 0 {
+		m.Cursor = len(m.Items) - 1
 	}
 }
 
 func (m *ListPane) MoveDown() {
 	if m.Cursor < len(m.Items)-1 {
 		m.Cursor++
+	} else if len(m.Items) > 0 {
+		m.Cursor = 0
 	}
 }
 

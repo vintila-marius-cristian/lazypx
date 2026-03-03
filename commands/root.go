@@ -62,6 +62,7 @@ Configuration: ~/.config/lazypx/config.yaml`,
 		newAccessCmd(nil),
 		newInitConfigCmd(),
 		newVersionCmd(),
+		newSSHCmd(),
 	)
 
 	// Inject global config into sub-commands at run time

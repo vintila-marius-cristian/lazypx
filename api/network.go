@@ -28,6 +28,36 @@ func (c *Client) GetNetworkInterfaces(ctx context.Context, node string) ([]Netwo
 	return out.Data, nil
 }
 
+// GuestNetworkInterface represents an interface returned by QEMU guest agent.
+type GuestNetworkInterface struct {
+	Name            string `json:"name"`
+	HardwareAddress string `json:"hardware-address"`
+	IPAddresses     []struct {
+		IPAddress     string `json:"ip-address"`
+		IPAddressType string `json:"ip-address-type"`
+		Prefix        int    `json:"prefix"`
+	} `json:"ip-addresses"`
+	Statistics struct {
+		RxBytes int64 `json:"rx-bytes"`
+		TxBytes int64 `json:"tx-bytes"`
+	} `json:"statistics"`
+}
+
+type GuestAgentResponse struct {
+	Result []GuestNetworkInterface `json:"result"`
+}
+
+// GetGuestAgentNetworkInterfaces fetches IPs via the QEMU Guest Agent.
+// Fails gracefully if the agent is disabled or unresponsive.
+func (c *Client) GetGuestAgentNetworkInterfaces(ctx context.Context, node string, vmid int) ([]GuestNetworkInterface, error) {
+	var out APIResponse[GuestAgentResponse]
+	path := fmt.Sprintf("/nodes/%s/qemu/%d/agent/network-get-interfaces", node, vmid)
+	if err := c.get(ctx, path, &out); err != nil {
+		return nil, fmt.Errorf("guest agent network: %w", err)
+	}
+	return out.Data.Result, nil
+}
+
 // ── Firewall (read-only) ──────────────────────────────────────────────────
 
 // FirewallRule represents a firewall rule.

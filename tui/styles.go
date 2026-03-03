@@ -6,7 +6,6 @@ import (
 
 var (
 	// Base colors
-	colorBg          = lipgloss.Color("#1a1b26")
 	colorBgAlt       = lipgloss.Color("#16161e")
 	colorBorder      = lipgloss.Color("#3b4261")
 	colorBorderFocus = lipgloss.Color("#7aa2f7")
@@ -18,7 +17,6 @@ var (
 	colorYellow      = lipgloss.Color("#e0af68")
 	colorMagenta     = lipgloss.Color("#bb9af7")
 	colorCyan        = lipgloss.Color("#7dcfff")
-	colorOrange      = lipgloss.Color("#ff9e64")
 	colorSelected    = lipgloss.Color("#364a82")
 	colorKeyBg       = lipgloss.Color("#1f2335")
 

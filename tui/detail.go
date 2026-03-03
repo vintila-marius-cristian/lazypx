@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -146,7 +147,6 @@ func (m DetailModel) renderVM(sel state.Selection, w int) string {
 			formatBytes(vm.NetIn), formatBytes(vm.NetOut))))
 	}
 
-	// Config-derived disk/net details (from VMConfig if loaded, or parsed from Status)
 	cfg := sel.VMConfig
 	if cfg != nil {
 		sb.WriteString("\n")
@@ -168,6 +168,25 @@ func (m DetailModel) renderVM(sel state.Selection, w int) string {
 		for _, n := range nets {
 			sb.WriteString("  " + StyleSubtext.Render(n.Key+": ") + StyleValue.Render(n.Val) + "\n")
 		}
+	}
+
+	// Guest IPs
+	if len(sel.GuestIPs) > 0 {
+		sb.WriteString("\n  " + StyleLabel.Render("── Guest IPs (QEMU Agent)") + "\n")
+		for _, net := range sel.GuestIPs {
+			if net.Name == "lo" {
+				continue
+			}
+			var ips []string
+			for _, ip := range net.IPAddresses {
+				ips = append(ips, fmt.Sprintf("%s/%d", ip.IPAddress, ip.Prefix))
+			}
+			if len(ips) > 0 {
+				sb.WriteString(fmt.Sprintf("  %-6s %s\n", StyleValue.Render(net.Name), StyleSubtext.Render(strings.Join(ips, ", "))))
+			}
+		}
+	} else if vm.Status == "running" {
+		sb.WriteString("\n  " + StyleSubtext.Render("IP unknown (guest agent disabled/unavailable?)") + "\n")
 	}
 
 	return sb.String()
@@ -287,7 +306,7 @@ func (m DetailModel) renderNode(sel state.Selection, w int) string {
 		for _, s := range storage {
 			active := StyleRunning.Render("●")
 			if s.Active == 0 {
-				active = StyleError2.Render("○")
+				active = StyleSubtext.Render("○")
 			}
 			usedPct := s.UsedFraction
 			bar := GaugeBar(gw, usedPct)
@@ -295,6 +314,43 @@ func (m DetailModel) renderNode(sel state.Selection, w int) string {
 				active, s.Storage, bar, usedPct*100,
 				formatBytes(s.Used), formatBytes(s.Total),
 				StyleSubtext.Render(s.Type))
+			sb.WriteString("  " + line + "\n")
+		}
+	}
+
+	// Show network interfaces
+	nics := snap.Network[n.Node]
+	if len(nics) > 0 {
+		sortedNics := make([]api.NetworkInterface, len(nics))
+		copy(sortedNics, nics)
+		sort.Slice(sortedNics, func(i, j int) bool {
+			return sortedNics[i].Iface < sortedNics[j].Iface
+		})
+
+		sb.WriteString("\n")
+		sb.WriteString("  " + StyleLabel.Render("── Network Interfaces") + "\n")
+		for _, nic := range sortedNics {
+			active := StyleRunning.Render("●")
+			if nic.Active == 0 {
+				active = StyleSubtext.Render("○")
+			}
+
+			addr := nic.Address
+			if addr == "" {
+				addr = "-"
+			} else if nic.Netmask != "" {
+				addr += "/" + nic.Netmask
+			}
+
+			details := fmt.Sprintf("%-6s %-15s", strings.ToLower(nic.Type), addr)
+			if nic.Gateway != "" {
+				details += fmt.Sprintf(" gw:%s", nic.Gateway)
+			}
+			if nic.BridgePorts != "" {
+				details += fmt.Sprintf(" ports:%s", nic.BridgePorts)
+			}
+
+			line := fmt.Sprintf("%s %-10s  %s", active, StyleValue.Render(nic.Iface), StyleSubtext.Render(details))
 			sb.WriteString("  " + line + "\n")
 		}
 	}
@@ -339,7 +395,13 @@ func (m DetailModel) renderStorage(sel state.Selection, w int) string {
 	}
 	sb.WriteString(row("Shared", shared))
 	if s.Content != "" {
-		sb.WriteString(row("Content", StyleSubtext.Render(s.Content)))
+		parts := strings.Split(s.Content, ",")
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		sort.Strings(parts)
+		sortedContent := strings.Join(parts, ", ")
+		sb.WriteString(row("Content", StyleSubtext.Render(sortedContent)))
 	}
 	sb.WriteString("\n")
 	usedPct := s.UsedFraction

@@ -100,6 +100,16 @@ type StorageStatus struct {
 	UsedFraction float64 `json:"used_fraction"` // 0.0–1.0
 }
 
+// BackupVolume represents a VZDump backup archive.
+type BackupVolume struct {
+	VolID  string `json:"volid"`
+	Format string `json:"format"`
+	Size   int64  `json:"size"`
+	VMID   int    `json:"vmid,omitempty"`
+	CTime  int64  `json:"ctime"`
+	Notes  string `json:"notes,omitempty"`
+}
+
 // Task represents a Proxmox task from /nodes/{node}/tasks.
 type Task struct {
 	UPID      string  `json:"upid"`

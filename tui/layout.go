@@ -199,7 +199,6 @@ func ComputeLayout(termW, termH int, focusedPanel state.PanelType) Layout {
 				target = &ctsH
 			}
 			if storageH > maxH {
-				maxH = storageH
 				target = &storageH
 			}
 

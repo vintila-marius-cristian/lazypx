@@ -25,7 +25,6 @@ func (m HelpModel) View(termW int) string {
 		{"x", "Stop VM / container"},
 		{"r", "Reboot"},
 		{"d", "Delete (confirmation)"},
-		{"l", "View logs"},
 		{"e", "Open shell (SSH)"},
 		{"m", "Migrate"},
 		{"b", "Backup"},

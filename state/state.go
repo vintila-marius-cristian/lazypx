@@ -37,8 +37,9 @@ type Selection struct {
 	VMStatus    *api.VMStatus
 	CTStatus    *api.CTStatus
 	NodeStatus  *api.NodeStatus
-	VMConfig    *api.VMConfig // loaded on demand; may be nil
-	StorageName string        // for KindStorage
+	VMConfig    *api.VMConfig               // loaded on demand; may be nil
+	GuestIPs    []api.GuestNetworkInterface // loaded on demand; may be nil
+	StorageName string                      // for KindStorage
 }
 
 // ActiveTask is a task that was triggered and is being watched.
@@ -81,6 +82,9 @@ type AppState struct {
 	ConfirmVisible bool
 	ConfirmMsg     string
 	ConfirmAction  func() interface{}
+
+	SnapshotsVisible bool
+	BackupsVisible   bool
 
 	// Loading
 	Loading bool

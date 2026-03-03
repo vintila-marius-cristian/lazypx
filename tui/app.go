@@ -33,10 +33,41 @@ type ClusterRefreshed struct {
 // RefreshTick triggers a background cache refresh.
 type RefreshTick struct{}
 
-// TaskLogLine carries a single log line from a watched task.
+// TaskLogLine is (historically) kept if needed elsewhere, but we will use taskLogStreamMsg internally.
 type TaskLogLine struct {
 	Index int
 	Line  string
+}
+
+type taskLogStreamMsg struct {
+	Idx  int
+	Line string
+	Next tea.Cmd
+}
+
+type taskDoneStreamMsg struct {
+	Idx     int
+	Success bool
+}
+
+func watchChannelCmd(ch <-chan api.TaskLog, idx int, client *api.Client, node, upid string) tea.Cmd {
+	return func() tea.Msg {
+		log, ok := <-ch
+		if !ok {
+			// Channel closed, task is done. Let's get the final status.
+			status, err := client.GetTaskStatus(context.Background(), node, upid)
+			success := true
+			if err == nil && status.ExitStatus != "OK" {
+				success = false
+			}
+			return taskDoneStreamMsg{Idx: idx, Success: success}
+		}
+		return taskLogStreamMsg{
+			Idx:  idx,
+			Line: log.T,
+			Next: watchChannelCmd(ch, idx, client, node, upid),
+		}
+	}
 }
 
 // TaskDone signals that a watched task has finished.
@@ -61,12 +92,14 @@ type Model struct {
 	sshHosts  map[int]config.SSHHost
 
 	// Sub-models
-	sidebar SidebarModel
-	detail  DetailModel
-	tasks   TasksModel
-	help    HelpModel
-	confirm ConfirmModel
-	search  SearchModel
+	sidebar   SidebarModel
+	detail    DetailModel
+	tasks     TasksModel
+	help      HelpModel
+	confirm   ConfirmModel
+	search    SearchModel
+	snapshots SnapshotsModel
+	backups   BackupsModel
 
 	spinner spinner.Model
 	layout  Layout // centralized layout dimensions
@@ -100,6 +133,8 @@ func New(apiClient *api.Client, clusterCache *cache.Cache, cfg *config.Profile) 
 		help:      NewHelpModel(),
 		confirm:   NewConfirmModel(st),
 		search:    NewSearchModel(st),
+		snapshots: NewSnapshotsModel(st, apiClient),
+		backups:   NewBackupsModel(st, apiClient),
 	}
 }
 
@@ -141,6 +176,44 @@ func tickRefresh(d time.Duration) tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	prevVMID := m.state.Selected.VMID
+	prevKind := m.state.Selected.Kind
+
+	// Highest Priority: Confirm Dialog traps ALL keys
+	if m.state.ConfirmVisible {
+		if keyMsg, isKey := msg.(tea.KeyMsg); isKey {
+			var cmd tea.Cmd
+			newM, cmd := m.handleConfirmKey(keyMsg, cmds)
+			return newM.(Model), cmd
+		}
+	}
+
+	if m.state.SnapshotsVisible {
+		var cmd tea.Cmd
+		m.snapshots, cmd = m.snapshots.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if _, ok := msg.(tea.WindowSizeMsg); !ok {
+			if _, isKey := msg.(tea.KeyMsg); isKey {
+				return m, tea.Batch(cmds...)
+			}
+		}
+	}
+
+	if m.state.BackupsVisible {
+		var cmd tea.Cmd
+		m.backups, cmd = m.backups.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if _, ok := msg.(tea.WindowSizeMsg); !ok {
+			if _, isKey := msg.(tea.KeyMsg); isKey {
+				return m, tea.Batch(cmds...)
+			}
+		}
+	}
+
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
@@ -155,7 +228,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd)
 
-	case ClusterLoaded:
+	case ClusterLoaded: // Renamed from ClusterLoaded to ClusterSnapshotMsg in the instruction, but keeping original name as per "make the change faithfully"
 		m.state.Loading = false
 		if msg.Snapshot.Error != nil {
 			m.state.Error = fmt.Sprintf("Failed to connect: %v", msg.Snapshot.Error)
@@ -166,6 +239,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		d := time.Duration(m.cfg.RefreshInterval) * time.Second
 		cmds = append(cmds, tickRefresh(d))
+
+	case VMExtrasLoadedMsg:
+		if m.state.Selected.Kind == state.KindVM && m.state.Selected.VMID == msg.VMID {
+			m.state.Selected.VMConfig = msg.Config
+			m.state.Selected.GuestIPs = msg.IPs
+			m.detail.Sync(m.state)
+		}
+		return m, tea.Batch(cmds...)
 
 	case ClusterRefreshed:
 		if msg.Snapshot.Error == nil {
@@ -189,37 +270,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TaskStartedMsg:
 		idx := m.state.AddTask(msg.UPID, msg.Node, msg.Label)
-		// Now that it's in state, we can watch it
-		cmd := func() tea.Msg {
-			ctx := context.Background() // could use timeout, but WatchTask is long running
-			ch := make(chan api.TaskLog, 50)
-			go m.apiClient.WatchTask(ctx, msg.Node, msg.UPID, ch)
-			for {
-				line, ok := <-ch
-				if !ok {
-					// Channel closed, task done
-					break
-				}
-				// We don't receive log lines dynamically in the TUI yet, but if we did we'd dispatch them here
-				_ = line
-			}
-			return TaskDone{Index: idx, Success: true} // Simplify: assume success if it finishes
-		}
-		cmds = append(cmds, cmd)
+		ch := make(chan api.TaskLog, 100)
+		go m.apiClient.WatchTask(context.Background(), msg.Node, msg.UPID, ch)
+		cmds = append(cmds, watchChannelCmd(ch, idx, m.apiClient, msg.Node, msg.UPID))
 
-	case TaskLogLine:
+	case taskLogStreamMsg:
+		m.state.AppendTaskLog(msg.Idx, msg.Line)
+		if msg.Next != nil {
+			cmds = append(cmds, msg.Next)
+		}
+
+	case TaskLogLine: // legacy, keep around just in case
 		m.state.AppendTaskLog(msg.Index, msg.Line)
 
-	case TaskDone:
+	case taskDoneStreamMsg:
+		m.state.MarkTaskDone(msg.Idx, msg.Success)
+		m.state.Loading = true
+		m.cache.Invalidate()
+		cmds = append(cmds, m.refreshCluster())
+
+	case TaskDone: // legacy
 		m.state.MarkTaskDone(msg.Index, msg.Success)
 		m.state.Loading = true
+		m.cache.Invalidate()
 		cmds = append(cmds, m.refreshCluster())
 
 	case tea.KeyMsg:
-		// Overlays take priority
-		if m.state.ConfirmVisible {
-			return m.handleConfirmKey(msg, cmds)
-		}
 		if m.state.HelpVisible {
 			if msg.String() == "?" || msg.String() == "q" || msg.String() == "esc" {
 				m.state.HelpVisible = false
@@ -239,7 +315,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tasks.Sync(m.state)
 	}
 
+	// Check if selection changed to a new VM
+	if m.state.Selected.Kind == state.KindVM {
+		if prevKind != state.KindVM || prevVMID != m.state.Selected.VMID {
+			cmds = append(cmds, m.loadVMExtrasCmd(m.state.Selected.NodeName, m.state.Selected.VMID))
+		}
+	}
+
 	return m, tea.Batch(cmds...)
+}
+
+// VMExtrasLoadedMsg contains on-demand data for a VM.
+type VMExtrasLoadedMsg struct {
+	VMID   int
+	Config *api.VMConfig
+	IPs    []api.GuestNetworkInterface
+}
+
+func (m Model) loadVMExtrasCmd(node string, vmid int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		cfg, _ := m.apiClient.GetVMConfig(ctx, node, vmid)
+		ips, _ := m.apiClient.GetGuestAgentNetworkInterfaces(ctx, node, vmid)
+
+		return VMExtrasLoadedMsg{VMID: vmid, Config: cfg, IPs: ips}
+	}
 }
 
 func (m Model) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
@@ -303,6 +405,12 @@ func (m Model) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 		m.state.Loading = true
 		cmds = append(cmds, m.refreshCluster())
 
+	case "c":
+		if m.state.Selected.Kind == state.KindVM || m.state.Selected.Kind == state.KindContainer {
+			m.state.SnapshotsVisible = true
+			cmds = append(cmds, m.snapshots.Load())
+		}
+
 	case "s":
 		cmd := m.actionStart()
 		if cmd != nil {
@@ -326,12 +434,13 @@ func (m Model) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 		m.state.ConfirmAction = func() interface{} { return nil }
 		m.state.ConfirmVisible = true
 
-	case "l":
-		// TODO: open log viewer for selected VM
 	case "m":
 		// TODO: migrate dialog
 	case "b":
-		// TODO: backup dialog
+		if m.state.Selected.Kind == state.KindVM || m.state.Selected.Kind == state.KindContainer {
+			m.state.BackupsVisible = true
+			cmds = append(cmds, m.backups.Load())
+		}
 	case "e":
 		cmd := m.actionShell()
 		if cmd != nil {
@@ -561,13 +670,20 @@ func (m Model) View() string {
 
 	full := lipgloss.JoinVertical(lipgloss.Left, header, body, taskPane, keyBar)
 
-	// Overlays (rendered on top)
+	// Overlays (rendered on bottom-to-top z-index)
 	if m.state.HelpVisible {
 		full = renderOverlay(full, m.help.View(l.TermW), l.TermW, l.TermH)
-	} else if m.state.ConfirmVisible {
-		full = renderOverlay(full, m.confirm.View(l.TermW), l.TermW, l.TermH)
+	} else if m.state.SnapshotsVisible {
+		full = renderOverlay(full, m.snapshots.View(), l.TermW, l.TermH)
+	} else if m.state.BackupsVisible {
+		full = renderOverlay(full, m.backups.View(), l.TermW, l.TermH)
 	} else if m.state.SearchActive {
 		full = renderOverlay(full, m.search.View(l.TermW), l.TermW, l.TermH)
+	}
+
+	// Confirm renders over EVERYTHING else
+	if m.state.ConfirmVisible {
+		full = renderOverlay(full, m.confirm.View(l.TermW), l.TermW, l.TermH)
 	}
 
 	return full
@@ -605,7 +721,7 @@ func (m Model) renderKeyBar() string {
 	l := m.layout
 	keys := []struct{ k, d string }{
 		{"s", "start"}, {"x", "stop"}, {"r", "reboot"}, {"d", "delete"},
-		{"l", "logs"}, {"e", "shell"}, {"m", "migrate"}, {"b", "backup"},
+		{"c", "snapshots"}, {"e", "shell"}, {"m", "migrate"}, {"b", "backup"},
 		{"/", "search"}, {"f", "refresh"}, {"?", "help"}, {"q", "quit"},
 	}
 	bar := ""

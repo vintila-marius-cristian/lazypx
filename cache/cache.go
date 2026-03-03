@@ -13,9 +13,11 @@ import (
 // ClusterSnapshot holds the full cluster state at a point in time.
 type ClusterSnapshot struct {
 	Nodes      []api.NodeStatus
-	VMs        map[string][]api.VMStatus      // node -> VMs
-	Containers map[string][]api.CTStatus      // node -> Containers
-	Storage    map[string][]api.StorageStatus // node -> Storage
+	VMs        map[string][]api.VMStatus         // node -> VMs
+	Containers map[string][]api.CTStatus         // node -> Containers
+	Storage    map[string][]api.StorageStatus    // node -> Storage
+	Network    map[string][]api.NetworkInterface // node -> Network
+	Tasks      []api.Task                        // global cluster tasks
 	FetchedAt  time.Time
 	Error      error
 }
@@ -90,6 +92,7 @@ func (c *Cache) Refresh(ctx context.Context) ClusterSnapshot {
 		vms        []api.VMStatus
 		containers []api.CTStatus
 		storage    []api.StorageStatus
+		network    []api.NetworkInterface
 	}
 
 	results := make(chan nodeResult, len(nodes))
@@ -101,7 +104,7 @@ func (c *Cache) Refresh(ctx context.Context) ClusterSnapshot {
 			res := nodeResult{node: node.Node}
 			// Fetch in parallel within each node too.
 			var innerWg sync.WaitGroup
-			innerWg.Add(3)
+			innerWg.Add(4)
 			go func() {
 				defer innerWg.Done()
 				res.vms, _ = c.client.GetVMs(ctx, node.Node)
@@ -114,10 +117,23 @@ func (c *Cache) Refresh(ctx context.Context) ClusterSnapshot {
 				defer innerWg.Done()
 				res.storage, _ = c.client.GetStorage(ctx, node.Node)
 			}()
+			go func() {
+				defer innerWg.Done()
+				res.network, _ = c.client.GetNetworkInterfaces(ctx, node.Node)
+			}()
 			innerWg.Wait()
 			results <- res
 		}(n)
 	}
+
+	var globalTasks []api.Task
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if t, err := c.client.GetClusterTasks(ctx); err == nil {
+			globalTasks = t
+		}
+	}()
 
 	go func() {
 		wg.Wait()
@@ -129,12 +145,15 @@ func (c *Cache) Refresh(ctx context.Context) ClusterSnapshot {
 		VMs:        make(map[string][]api.VMStatus),
 		Containers: make(map[string][]api.CTStatus),
 		Storage:    make(map[string][]api.StorageStatus),
+		Network:    make(map[string][]api.NetworkInterface),
+		Tasks:      globalTasks,
 		FetchedAt:  time.Now(),
 	}
 	for res := range results {
 		snap.VMs[res.node] = res.vms
 		snap.Containers[res.node] = res.containers
 		snap.Storage[res.node] = res.storage
+		snap.Network[res.node] = res.network
 	}
 
 	c.mu.Lock()

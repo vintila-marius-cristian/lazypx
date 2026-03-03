@@ -2,7 +2,7 @@ package tui
 
 import (
 	"fmt"
-
+	"lazypx/api"
 	"lazypx/state"
 )
 
@@ -43,21 +43,34 @@ func (m TasksModel) View(innerW, innerH int, focused bool) string {
 	title := StyleTitle.Render(" Tasks & Events")
 	inner := title + "\n"
 
-	tasks := m.st.ActiveTasks
-	maxRows := innerH - 1 // -1 for title line
+	maxRows := innerH - 1
 	if maxRows < 1 {
 		maxRows = 1
 	}
 
-	if len(tasks) == 0 {
+	var rows []string
+
+	// 1. Show local active tasks first with live logs
+	for i := len(m.st.ActiveTasks) - 1; i >= 0; i-- {
+		t := m.st.ActiveTasks[i]
+		rows = append(rows, renderActiveTaskRow(t, innerW))
+	}
+
+	// 2. Add global API tasks (newest are typically at the end of the array)
+	for i := len(m.st.Snapshot.Tasks) - 1; i >= 0; i-- {
+		t := m.st.Snapshot.Tasks[i]
+		rows = append(rows, renderClusterTaskRow(t, innerW))
+	}
+
+	if len(rows) == 0 {
 		inner += "  " + StyleSubtext.Render("No tasks yet.") + "\n"
 	} else {
-		start := len(tasks) - maxRows
-		if start < 0 {
-			start = 0
+		limit := len(rows)
+		if limit > maxRows {
+			limit = maxRows
 		}
-		for _, t := range tasks[start:] {
-			inner += renderTaskRow(t, innerW) + "\n"
+		for i := 0; i < limit; i++ {
+			inner += rows[i] + "\n"
 		}
 	}
 
@@ -65,7 +78,36 @@ func (m TasksModel) View(innerW, innerH int, focused bool) string {
 	return style.Width(innerW).Height(innerH).Render(content)
 }
 
-func renderTaskRow(t state.ActiveTask, maxW int) string {
+func renderClusterTaskRow(t api.Task, maxW int) string {
+	var status string
+	switch t.Status {
+	// API typically sets "status":"stopped" when done.
+	case "stopped":
+		// Proxmox doesn't easily expose success/fail inside the base `/cluster/tasks` object
+		// without parsing `exitstatus`. But it's good enough for an OK tag.
+		status = StyleTaskLog.Render("[OK] ")
+	default:
+		// Any other string or "" usually implies running
+		status = StyleTaskRun.Render("[\u2026] ")
+	}
+
+	// Example: "vzdump", "qmsnapshot", "qmstart"
+	actionName := t.Type
+
+	var target string
+	if t.ID != "" {
+		target = fmt.Sprintf(" %s", t.ID)
+	}
+
+	label := StyleValue.Render(fmt.Sprintf("%s%s on %s", actionName, target, t.Node))
+
+	user := StyleSubtext.Render(fmt.Sprintf(" (%s)", t.User))
+
+	line := fmt.Sprintf("  %s %s%s", status, label, user)
+	return truncate(line, maxW)
+}
+
+func renderActiveTaskRow(t state.ActiveTask, maxW int) string {
 	var status string
 	if t.Done {
 		if t.Success {
@@ -74,7 +116,7 @@ func renderTaskRow(t state.ActiveTask, maxW int) string {
 			status = StyleTaskErr.Render("[ERR]")
 		}
 	} else {
-		status = StyleTaskRun.Render("[.. ]")
+		status = StyleTaskRun.Render("[\u2026] ")
 	}
 
 	label := StyleValue.Render(t.Label)
@@ -83,9 +125,9 @@ func renderTaskRow(t state.ActiveTask, maxW int) string {
 		logLine = "  " + StyleTaskLog.Render("└ "+t.Logs[len(t.Logs)-1])
 	}
 
-	line := fmt.Sprintf("  %s  %s", status, label)
+	line := fmt.Sprintf("  %s %s", status, label)
 	if logLine != "" {
-		line += "\n" + logLine
+		line += "\n" + truncate(logLine, maxW)
 	}
-	return line
+	return truncate(line, maxW)
 }
