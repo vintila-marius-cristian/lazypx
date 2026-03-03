@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"time"
+
 	"lazypx/api"
 	"lazypx/state"
 )
@@ -50,13 +52,19 @@ func (m TasksModel) View(innerW, innerH int, focused bool) string {
 
 	var rows []string
 
-	// 1. Show local active tasks first with live logs
+	// 1. Local events (shell open/close, etc.) — most recent first.
+	for i := len(m.st.LocalEvents) - 1; i >= 0; i-- {
+		ev := m.st.LocalEvents[i]
+		rows = append(rows, renderLocalEventRow(ev, innerW))
+	}
+
+	// 2. Show local active tasks with live logs.
 	for i := len(m.st.ActiveTasks) - 1; i >= 0; i-- {
 		t := m.st.ActiveTasks[i]
 		rows = append(rows, renderActiveTaskRow(t, innerW))
 	}
 
-	// 2. Add global API tasks (newest are typically at the end of the array)
+	// 3. Add global API tasks (newest are typically at the end of the array).
 	for i := len(m.st.Snapshot.Tasks) - 1; i >= 0; i-- {
 		t := m.st.Snapshot.Tasks[i]
 		rows = append(rows, renderClusterTaskRow(t, innerW))
@@ -105,6 +113,32 @@ func renderClusterTaskRow(t api.Task, maxW int) string {
 
 	line := fmt.Sprintf("  %s %s%s", status, label, user)
 	return truncate(line, maxW)
+}
+
+func renderLocalEventRow(ev state.LocalEvent, maxW int) string {
+	var icon string
+	switch ev.Level {
+	case "warn":
+		icon = StyleTaskRun.Render("[!]  ")
+	case "error":
+		icon = StyleTaskErr.Render("[✗]  ")
+	default:
+		icon = StyleTaskLog.Render("[ℹ]  ")
+	}
+	age := time.Since(ev.At).Truncate(time.Second)
+	label := StyleSubtext.Render(ev.Label)
+	ts := StyleSubtext.Render(fmt.Sprintf(" (%s ago)", formatAge(age)))
+	return truncate("  "+icon+label+ts, maxW)
+}
+
+func formatAge(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%dh", int(d.Hours()))
 }
 
 func renderActiveTaskRow(t state.ActiveTask, maxW int) string {

@@ -49,6 +49,10 @@ proxmox-cli/
 ├── state/
 │   └── state.go               # AppState + Selection + ActiveTask (no logic)
 │
+├── sessions/
+│   ├── manager.go             # persistent tmux-backed SSH sessions
+│   └── manager_test.go        # session keying tests
+│
 ├── config/
 │   ├── config.go              # YAML config loader (Viper), multi-profile
 │   └── keyring.go             # OS keychain read/write (go-keyring)
@@ -62,7 +66,8 @@ proxmox-cli/
 │   ├── tree.go                # Left pane: cluster navigation tree
 │   ├── detail.go              # Main pane: resource detail (VM/CT/node/storage)
 │   ├── tasks.go               # Bottom pane: live task log
-│   └── help.go                # Overlays: help modal, confirm modal, search
+│   ├── help.go                # Overlays: help modal, confirm modal, search
+│   └── sessions_overlay.go    # Overlay: tmux SSH sessions picker
 │
 └── commands/
     ├── root.go                # Cobra root + TUI launcher + PersistentPreRunE
@@ -305,7 +310,8 @@ style.Width(innerW).Height(innerH).Render(content)
 | `S` | Stop VM/CT (confirm) | Tree |
 | `r` | Reboot VM/CT (confirm) | Tree |
 | `d` | Delete VM/CT (confirm) | Tree |
-| `l` | Open task log viewer | Tree |
+| `e` | Open persistent SSH shell | Tree |
+| `t` | Open Shell Sessions Manager | Global |
 | `c` | Clone VM (TODO: modal) | Tree |
 | `m` | Migrate VM | Tree |
 | `b` | Backup VM | Tree |
@@ -404,12 +410,13 @@ Tokyo Night–inspired palette. All visual tokens defined once:
 
 ---
 
-### `tui/help.go` — Overlays
+### `tui/help.go` & `tui/sessions_overlay.go` — Overlays
 
-Three overlays rendered via `lipgloss.Place` centred over a blurred background string:
+Overlays rendered via `lipgloss.Place` centred over a blurred background string:
 - **Help** (`?`): Static keybinding table
 - **Confirm** (`d`,`S`,`r`): Dynamic message + `ConfirmAction func()` called on `y`
 - **Search** (`/`): Captures keypresses, updates `SearchQuery`, live-filters tree
+- **Sessions** (`t`): Parses `tmux ls` output and manages background SSH shells. Allows attaching and terminating sessions independently of the main UI thread. Sessions are keyed by `lazypx-{profile}-{vmid}`.
 
 ---
 

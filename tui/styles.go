@@ -154,6 +154,13 @@ var (
 
 	// Subtext (secondary info, dim labels)
 	StyleSubtext = lipgloss.NewStyle().Foreground(colorSubtext)
+
+	// Overlay box (sessions picker, etc.)
+	StyleOverlayBox = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorCyan).
+			Background(colorBgAlt).
+			Padding(1, 2)
 )
 
 // GaugeBar renders a percentage bar like ████░░░░ 78%

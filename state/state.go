@@ -2,9 +2,18 @@
 package state
 
 import (
+	"time"
+
 	"lazypx/api"
 	"lazypx/cache"
 )
+
+// LocalEvent is a UI-level event (not a Proxmox task) such as shell open/close.
+type LocalEvent struct {
+	Label string
+	Level string // "info", "warn", "error"
+	At    time.Time
+}
 
 // PanelType identifies which pane is currently focused.
 type PanelType int
@@ -85,6 +94,11 @@ type AppState struct {
 
 	SnapshotsVisible bool
 	BackupsVisible   bool
+	SessionsVisible  bool
+
+	// Shell pane state
+	ShellFocused   bool   // true when keystrokes route to the embedded shell
+	ActiveShellKey string // session key shown in the detail pane ("" = show details)
 
 	// Loading
 	Loading bool
@@ -93,6 +107,9 @@ type AppState struct {
 	// Profile name for display
 	ProfileName string
 	Production  bool
+
+	// Local events (shell open/close, etc.) shown in the tasks pane.
+	LocalEvents []LocalEvent
 }
 
 // New creates an initial (empty) AppState.
@@ -125,5 +142,18 @@ func (s *AppState) MarkTaskDone(idx int, success bool) {
 	if idx < len(s.ActiveTasks) {
 		s.ActiveTasks[idx].Done = true
 		s.ActiveTasks[idx].Success = success
+	}
+}
+
+// AddLocalEvent appends a local (non-Proxmox) event to the event log.
+// Keeps the last 50 entries.
+func (s *AppState) AddLocalEvent(label, level string) {
+	s.LocalEvents = append(s.LocalEvents, LocalEvent{
+		Label: label,
+		Level: level,
+		At:    time.Now(),
+	})
+	if len(s.LocalEvents) > 50 {
+		s.LocalEvents = s.LocalEvents[len(s.LocalEvents)-50:]
 	}
 }

@@ -3,12 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"strconv"
 	"time"
 
 	"lazypx/config"
+	"lazypx/sessions"
 
 	"github.com/spf13/cobra"
 )
@@ -58,24 +57,21 @@ func newSSHCmd() *cobra.Command {
 			sshArgs = append(sshArgs, "-o", "StrictHostKeyChecking=accept-new")
 			sshArgs = append(sshArgs, target)
 
-			var c *exec.Cmd
-			if host.Password != "" {
-				if _, err := exec.LookPath("sshpass"); err == nil {
-					sshArgs = append([]string{"-e", "ssh"}, sshArgs...)
-					c = exec.Command("sshpass", sshArgs...)
-					c.Env = append(os.Environ(), "SSHPASS="+host.Password)
-				} else {
-					c = exec.Command("ssh", sshArgs...)
-				}
-			} else {
-				c = exec.Command("ssh", sshArgs...)
+			profileName := "default"
+			if cfgGlobal != nil && cfgGlobal.ActiveProfile != nil {
+				profileName = cfgGlobal.ActiveProfile.Name
+			}
+			mgr := sessions.New(profileName)
+			sessionKey := mgr.SessionKey(vmid)
+
+			// Open (or reuse) a PTY session running ssh.
+			// We do NOT inject passwords; ssh will prompt interactively.
+			if err := mgr.OpenSession(sessionKey, "ssh", sshArgs); err != nil {
+				return fmt.Errorf("failed to open session: %w", err)
 			}
 
-			c.Stdin = os.Stdin
-			c.Stdout = os.Stdout
-			c.Stderr = os.Stderr
-
-			return c.Run()
+			// Attach to the session (blocks until detach).
+			return mgr.AttachCmd(sessionKey).Run()
 		},
 	}
 }

@@ -25,7 +25,11 @@ func (m HelpModel) View(termW int) string {
 		{"x", "Stop VM / container"},
 		{"r", "Reboot"},
 		{"d", "Delete (confirmation)"},
-		{"e", "Open shell (SSH)"},
+		{"e", "Open / focus embedded shell"},
+		{"ctrl+q", "Unfocus shell (keep visible)"},
+		{"ctrl+w", "Close shell view (session persists)"},
+		{"ctrl+u / ctrl+d", "Scroll shell history ↑ / ↓"},
+		{"t", "Sessions picker overlay"},
 		{"m", "Migrate"},
 		{"b", "Backup"},
 	}

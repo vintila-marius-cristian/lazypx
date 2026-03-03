@@ -126,12 +126,18 @@ func (c *Cache) Refresh(ctx context.Context) ClusterSnapshot {
 		}(n)
 	}
 
+	// IMPORTANT: globalTasks goroutine must be registered with wg BEFORE
+	// the goroutine that calls wg.Wait()/close(results), otherwise
+	// wg.Wait() can complete before wg.Add(1) runs → globalTasks is nil.
 	var globalTasks []api.Task
+	var tasksMu sync.Mutex
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		if t, err := c.client.GetClusterTasks(ctx); err == nil {
+			tasksMu.Lock()
 			globalTasks = t
+			tasksMu.Unlock()
 		}
 	}()
 
@@ -146,7 +152,6 @@ func (c *Cache) Refresh(ctx context.Context) ClusterSnapshot {
 		Containers: make(map[string][]api.CTStatus),
 		Storage:    make(map[string][]api.StorageStatus),
 		Network:    make(map[string][]api.NetworkInterface),
-		Tasks:      globalTasks,
 		FetchedAt:  time.Now(),
 	}
 	for res := range results {
@@ -155,6 +160,12 @@ func (c *Cache) Refresh(ctx context.Context) ClusterSnapshot {
 		snap.Storage[res.node] = res.storage
 		snap.Network[res.node] = res.network
 	}
+
+	// Safe to read globalTasks now — wg.Wait() completed (close(results) fired),
+	// meaning the globalTasks goroutine has finished.
+	tasksMu.Lock()
+	snap.Tasks = globalTasks
+	tasksMu.Unlock()
 
 	c.mu.Lock()
 	c.snapshot = snap

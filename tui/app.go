@@ -3,8 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"strconv"
 	"time"
 
@@ -15,6 +13,7 @@ import (
 	"lazypx/api"
 	"lazypx/cache"
 	"lazypx/config"
+	"lazypx/sessions"
 	"lazypx/state"
 )
 
@@ -92,17 +91,21 @@ type Model struct {
 	sshHosts  map[int]config.SSHHost
 
 	// Sub-models
-	sidebar   SidebarModel
-	detail    DetailModel
-	tasks     TasksModel
-	help      HelpModel
-	confirm   ConfirmModel
-	search    SearchModel
-	snapshots SnapshotsModel
-	backups   BackupsModel
+	sidebar         SidebarModel
+	detail          DetailModel
+	tasks           TasksModel
+	help            HelpModel
+	confirm         ConfirmModel
+	search          SearchModel
+	snapshots       SnapshotsModel
+	backups         BackupsModel
+	sessionsOverlay SessionsModel
 
-	spinner spinner.Model
-	layout  Layout // centralized layout dimensions
+	sessionsMgr *sessions.Manager
+	// shellPanes holds one embedded terminal per session key.
+	shellPanes map[string]*ShellPane
+	spinner    spinner.Model
+	layout     Layout // centralized layout dimensions
 }
 
 // New creates the root TUI model.
@@ -120,21 +123,26 @@ func New(apiClient *api.Client, clusterCache *cache.Cache, cfg *config.Profile) 
 
 	ssh, _ := config.LoadSSH() // ignore error, map will be empty
 
+	mgr := sessions.New(profileName)
+
 	return Model{
-		state:     st,
-		apiClient: apiClient,
-		cache:     clusterCache,
-		cfg:       cfg,
-		sshHosts:  ssh,
-		spinner:   s,
-		sidebar:   NewSidebarModel(st),
-		detail:    NewDetailModel(st),
-		tasks:     NewTasksModel(st),
-		help:      NewHelpModel(),
-		confirm:   NewConfirmModel(st),
-		search:    NewSearchModel(st),
-		snapshots: NewSnapshotsModel(st, apiClient),
-		backups:   NewBackupsModel(st, apiClient),
+		state:           st,
+		apiClient:       apiClient,
+		cache:           clusterCache,
+		cfg:             cfg,
+		sshHosts:        ssh,
+		spinner:         s,
+		sidebar:         NewSidebarModel(st),
+		detail:          NewDetailModel(st),
+		tasks:           NewTasksModel(st),
+		help:            NewHelpModel(),
+		confirm:         NewConfirmModel(st),
+		search:          NewSearchModel(st),
+		snapshots:       NewSnapshotsModel(st, apiClient),
+		backups:         NewBackupsModel(st, apiClient),
+		sessionsMgr:     mgr,
+		sessionsOverlay: NewSessionsModel(st, mgr), // share the same manager
+		shellPanes:      make(map[string]*ShellPane),
 	}
 }
 
@@ -214,6 +222,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.state.SessionsVisible {
+		if keyMsg, isKey := msg.(tea.KeyMsg); isKey {
+			switch keyMsg.String() {
+			case "esc":
+				m.state.SessionsVisible = false
+			case "k", "up":
+				m.sessionsOverlay.MoveUp()
+			case "j", "down":
+				m.sessionsOverlay.MoveDown()
+			case "d":
+				if sel := m.sessionsOverlay.Selected(); sel != nil {
+					m.state.ConfirmMsg = fmt.Sprintf("Terminate session %s?", sel.Key)
+					keyToKill := sel.Key
+					m.state.ConfirmAction = func() interface{} {
+						m.sessionsMgr.CloseSession(keyToKill)
+						m.sessionsOverlay.Refresh()
+						return nil
+					}
+					m.state.ConfirmVisible = true
+				}
+			case "enter":
+				if sel := m.sessionsOverlay.Selected(); sel != nil {
+					m.state.SessionsVisible = false
+					key := sel.Key
+					if sp, hasSP := m.shellPanes[key]; hasSP && !sp.ended {
+						// Session has an embedded pane — switch to it.
+						m.state.ActiveShellKey = key
+						m.state.ShellFocused = true
+					} else {
+						// No embedded pane — fall back to full-screen attach.
+						return m, tea.Exec(m.sessionsMgr.AttachCmd(key), func(err error) tea.Msg {
+							if err != nil {
+								return ActionError{Err: err}
+							}
+							return RefreshTick{}
+						})
+					}
+				}
+			}
+			return m, tea.Batch(cmds...)
+		}
+	}
+
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
@@ -222,6 +273,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sidebar.SetSize(m.layout)
 		m.detail.SetSize(m.layout.DetailInnerW, m.layout.DetailInnerH)
 		m.tasks.SetSize(m.layout.TasksInnerW, m.layout.TasksInnerH)
+		// Resize all shell panes and their underlying PTYs.
+		for key, sp := range m.shellPanes {
+			sp.SetSize(m.layout.DetailInnerW, m.layout.DetailInnerH)
+			m.sessionsMgr.ResizePTY(key, m.layout.DetailInnerW, m.layout.DetailInnerH) //nolint:errcheck
+		}
+
+	case ShellOutputMsg:
+		if sp, ok := m.shellPanes[msg.Key]; ok {
+			if msg.Data != nil {
+				sp.Feed(msg.Data)
+			}
+			// Keep the read pipeline alive.
+			if cmd := sp.StartReadCmd(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+		return m, tea.Batch(cmds...)
+
+	case ShellExitedMsg:
+		if sp, ok := m.shellPanes[msg.Key]; ok {
+			sp.ended = true
+			sp.exitErr = msg.Err
+			m.state.AddLocalEvent(fmt.Sprintf("Shell exited: %s", msg.Key), "warn")
+		}
+		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -315,10 +391,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tasks.Sync(m.state)
 	}
 
-	// Check if selection changed to a new VM
+	// Check if selection changed to a new VM.
 	if m.state.Selected.Kind == state.KindVM {
 		if prevKind != state.KindVM || prevVMID != m.state.Selected.VMID {
 			cmds = append(cmds, m.loadVMExtrasCmd(m.state.Selected.NodeName, m.state.Selected.VMID))
+		}
+	}
+
+	// Keep ActiveShellKey in sync with the current selection.
+	// When the user navigates to a different item, show that item's shell (if any).
+	if prevVMID != m.state.Selected.VMID || prevKind != m.state.Selected.Kind {
+		newKey := m.shellKeyForSelection()
+		if newKey != m.state.ActiveShellKey {
+			m.state.ActiveShellKey = newKey
+			m.state.ShellFocused = false // unfocus when navigating away
 		}
 	}
 
@@ -345,6 +431,11 @@ func (m Model) loadVMExtrasCmd(node string, vmid int) tea.Cmd {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	// When shell is focused, all keystrokes go to the PTY.
+	if m.state.ShellFocused && m.state.ActiveShellKey != "" {
+		return m.handleShellKey(msg, cmds)
+	}
+
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -441,10 +532,39 @@ func (m Model) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 			m.state.BackupsVisible = true
 			cmds = append(cmds, m.backups.Load())
 		}
+	case "t":
+		m.state.SessionsVisible = true
+		m.sessionsOverlay.Refresh()
+
 	case "e":
-		cmd := m.actionShell()
-		if cmd != nil {
-			cmds = append(cmds, cmd)
+		// If a shell pane already exists for this VM, focus it.
+		// Otherwise open a new embedded shell session.
+		if key := m.shellKeyForSelection(); key != "" {
+			m.state.ActiveShellKey = key
+			m.state.ShellFocused = true
+		} else {
+			cmd := m.actionShell()
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+
+	case "ctrl+w":
+		// Close the shell VIEW (session keeps running).
+		if m.state.ActiveShellKey != "" {
+			m.closeShellView()
+		}
+
+	case "ctrl+u":
+		// Scroll shell view up into history (when shell is visible but not focused).
+		if sp, ok := m.shellPanes[m.state.ActiveShellKey]; ok {
+			sp.ScrollUp(5)
+		}
+
+	case "ctrl+d":
+		// Scroll shell view down toward the live screen.
+		if sp, ok := m.shellPanes[m.state.ActiveShellKey]; ok {
+			sp.ScrollDown(5)
 		}
 	}
 
@@ -564,27 +684,35 @@ func (m *Model) actionStop() tea.Cmd {
 	return nil
 }
 
+// actionShell opens an embedded PTY shell for the selected VM/CT.
+// It replaces the detail pane with a ShellPane and starts async PTY reading.
 func (m *Model) actionShell() tea.Cmd {
 	sel := m.state.Selected
 	var vmid int
+	var vmName string
+	var kind state.ResourceKind
+
 	switch sel.Kind {
 	case state.KindVM:
-		if sel.VMStatus != nil {
-			vmid = sel.VMStatus.VMID
+		if sel.VMStatus == nil {
+			return nil
 		}
+		vmid = sel.VMStatus.VMID
+		vmName = sel.VMStatus.Name
+		kind = state.KindVM
 	case state.KindContainer:
-		if sel.CTStatus != nil {
-			vmid = sel.CTStatus.VMID
+		if sel.CTStatus == nil {
+			return nil
 		}
-	}
-
-	if vmid == 0 {
+		vmid = sel.CTStatus.VMID
+		vmName = sel.CTStatus.Name
+		kind = state.KindContainer
+	default:
 		return nil
 	}
 
 	host, ok := m.sshHosts[vmid]
 	if !ok {
-		// Can't show error right now unless we dispatch an ActionError, so let's dispatch ActionError.
 		return func() tea.Msg {
 			return ActionError{Err: fmt.Errorf("no SSH mapping for VMID %d in ~/.config/lazypx/ssh.yaml", vmid)}
 		}
@@ -594,40 +722,116 @@ func (m *Model) actionShell() tea.Cmd {
 	if host.User != "" {
 		target = host.User + "@" + host.Host
 	}
-
-	args := []string{}
+	var args []string
 	if host.IdentityFile != "" {
 		args = append(args, "-i", host.IdentityFile)
 	}
 	if host.Port != 0 {
 		args = append(args, "-p", strconv.Itoa(host.Port))
 	}
-	// Avoid StrictHostKeyChecking issues for dynamic VMs sometimes
 	args = append(args, "-o", "StrictHostKeyChecking=accept-new")
 	args = append(args, target)
 
-	var c *exec.Cmd
-	// Use sshpass if password is provided
-	if host.Password != "" {
-		if _, err := exec.LookPath("sshpass"); err == nil {
-			args = append([]string{"-e", "ssh"}, args...)
-			c = exec.Command("sshpass", args...)
-			c.Env = append(os.Environ(), "SSHPASS="+host.Password)
-		} else {
-			// Fallback: regular SSH (will prompt)
-			c = exec.Command("ssh", args...)
+	sessionKey := m.sessionsMgr.SessionKey(vmid)
+
+	// OpenSession is a no-op if the process is still running.
+	if err := m.sessionsMgr.OpenSession(sessionKey, "ssh", args); err != nil {
+		return func() tea.Msg {
+			return ActionError{Err: fmt.Errorf("failed to start session: %w", err)}
 		}
-	} else {
-		c = exec.Command("ssh", args...)
 	}
 
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		if err != nil {
-			return ActionError{Err: fmt.Errorf("ssh session ended: %w", err)}
+	// Create the embedded ShellPane (or reuse if it already exists).
+	sp, exists := m.shellPanes[sessionKey]
+	if !exists || sp.ended {
+		sp = NewShellPane(
+			sessionKey, vmid, vmName, kind,
+			m.sessionsMgr,
+			m.layout.DetailInnerW, m.layout.DetailInnerH,
+		)
+		m.shellPanes[sessionKey] = sp
+	}
+
+	m.state.ActiveShellKey = sessionKey
+	m.state.ShellFocused = true
+
+	// Resize PTY to match current pane dimensions.
+	m.sessionsMgr.ResizePTY(sessionKey, m.layout.DetailInnerW, m.layout.DetailInnerH) //nolint:errcheck
+
+	// Emit local event.
+	kindStr := "VM"
+	if kind == state.KindContainer {
+		kindStr = "CT"
+	}
+	m.state.AddLocalEvent(fmt.Sprintf("Shell opened: %s %d (%s)", kindStr, vmid, vmName), "info")
+
+	// Start the async PTY read pipeline.
+	return sp.StartReadCmd()
+}
+
+// shellKeyForSelection returns the session key for the currently selected VM/CT
+// if an embedded ShellPane exists for it, otherwise "".
+func (m Model) shellKeyForSelection() string {
+	var vmid int
+	switch m.state.Selected.Kind {
+	case state.KindVM:
+		if m.state.Selected.VMStatus != nil {
+			vmid = m.state.Selected.VMStatus.VMID
 		}
-		// Refresh UI when we get back
-		return RefreshTick{}
-	})
+	case state.KindContainer:
+		if m.state.Selected.CTStatus != nil {
+			vmid = m.state.Selected.CTStatus.VMID
+		}
+	}
+	if vmid == 0 {
+		return ""
+	}
+	key := m.sessionsMgr.SessionKey(vmid)
+	if _, ok := m.shellPanes[key]; ok {
+		return key
+	}
+	return ""
+}
+
+// closeShellView hides the shell pane for the current VM (session keeps running).
+func (m *Model) closeShellView() {
+	key := m.state.ActiveShellKey
+	m.state.ActiveShellKey = ""
+	m.state.ShellFocused = false
+	if key != "" {
+		m.state.AddLocalEvent(fmt.Sprintf("Shell view closed: %s", key), "info")
+	}
+}
+
+// handleShellKey routes keypresses to the PTY when the shell has focus.
+// ctrl+q unfocuses (returns to tree navigation); ctrl+w closes the shell view.
+func (m Model) handleShellKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	s := msg.String()
+
+	switch s {
+	case "ctrl+q":
+		// Detach focus; shell stays visible and running.
+		m.state.ShellFocused = false
+		return m, tea.Batch(cmds...)
+
+	case "ctrl+w":
+		// Close shell view entirely (session keeps running).
+		m.closeShellView()
+		return m, tea.Batch(cmds...)
+	}
+
+	// Forward everything else to the PTY.
+	if sp, ok := m.shellPanes[m.state.ActiveShellKey]; ok && !sp.ended {
+		if data := KeyToShellBytes(msg); data != nil {
+			sp.WriteToShell(data)
+			// Any input resets the scroll view to live.
+			if sp.IsScrolled() {
+				sp.ScrollReset()
+			}
+		}
+	}
+
+	return m, tea.Batch(cmds...)
 }
 
 func (m *Model) selectionLabel() string {
@@ -679,6 +883,8 @@ func (m Model) View() string {
 		full = renderOverlay(full, m.backups.View(), l.TermW, l.TermH)
 	} else if m.state.SearchActive {
 		full = renderOverlay(full, m.search.View(l.TermW), l.TermW, l.TermH)
+	} else if m.state.SessionsVisible {
+		full = renderOverlay(full, m.sessionsOverlay.View(l.TermW, l.TermH), l.TermW, l.TermH)
 	}
 
 	// Confirm renders over EVERYTHING else
@@ -713,21 +919,54 @@ func (m Model) renderHeader() string {
 
 func (m Model) renderMain() string {
 	sidebarPane := m.sidebar.View(m.state.FocusedPanel)
-	detailPane := m.detail.View(m.state.FocusedPanel == state.PanelDetail)
+
+	var detailPane string
+	if m.state.ActiveShellKey != "" {
+		if sp, ok := m.shellPanes[m.state.ActiveShellKey]; ok {
+			detailPane = sp.View(m.state.ShellFocused)
+		} else {
+			detailPane = m.detail.View(m.state.FocusedPanel == state.PanelDetail)
+		}
+	} else {
+		detailPane = m.detail.View(m.state.FocusedPanel == state.PanelDetail)
+	}
+
 	return lipgloss.JoinHorizontal(lipgloss.Top, sidebarPane, detailPane)
 }
 
 func (m Model) renderKeyBar() string {
 	l := m.layout
-	keys := []struct{ k, d string }{
-		{"s", "start"}, {"x", "stop"}, {"r", "reboot"}, {"d", "delete"},
-		{"c", "snapshots"}, {"e", "shell"}, {"m", "migrate"}, {"b", "backup"},
-		{"/", "search"}, {"f", "refresh"}, {"?", "help"}, {"q", "quit"},
+
+	var keys []struct{ k, d string }
+	if m.state.ShellFocused && m.state.ActiveShellKey != "" {
+		// Shell input mode: show detach / close / scroll hints.
+		keys = []struct{ k, d string }{
+			{"ctrl+q", "unfocus shell"},
+			{"ctrl+w", "close shell view"},
+			{"ctrl+u", "scroll ↑"},
+			{"ctrl+d", "scroll ↓"},
+		}
+	} else if m.state.ActiveShellKey != "" {
+		// Shell visible but tree-focused: show shell nav hints.
+		keys = []struct{ k, d string }{
+			{"e", "focus shell"},
+			{"ctrl+w", "close shell view"},
+			{"ctrl+u", "scroll ↑"},
+			{"ctrl+d", "scroll ↓"},
+			{"s", "start"}, {"x", "stop"}, {"c", "snapshots"},
+			{"/", "search"}, {"?", "help"}, {"q", "quit"},
+		}
+	} else {
+		keys = []struct{ k, d string }{
+			{"s", "start"}, {"x", "stop"}, {"r", "reboot"}, {"d", "delete"},
+			{"c", "snapshots"}, {"e", "shell"}, {"m", "migrate"}, {"b", "backup"},
+			{"/", "search"}, {"f", "refresh"}, {"?", "help"}, {"q", "quit"},
+		}
 	}
+
 	bar := ""
 	for _, kd := range keys {
 		entry := StyleKeyBracket.Render("["+kd.k+"]") + StyleKeyHint.Render(kd.d+" ")
-		// Stop adding keys if we'd overflow
 		if lipgloss.Width(bar+entry) > l.TermW-2 {
 			break
 		}
