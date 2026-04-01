@@ -22,7 +22,7 @@ Navigate your entire datacenter without leaving the terminal — with an embedde
 
 ### Build from Source
 
-Requires Go 1.22+:
+Requires Go 1.25+:
 
 ```bash
 git clone https://github.com/your-username/lazypx.git
@@ -213,6 +213,7 @@ lazypx/
 ├── main.go              # Entry point — routes TUI vs CLI
 ├── commands/            # CLI subcommands (vm, ssh, snapshot)
 ├── api/                 # Proxmox API client (REST + token auth)
+├── audit/               # Local audit log for TUI actions
 ├── cache/               # TTL-based cluster snapshot cache
 ├── config/              # Config + SSH yaml loaders, keyring integration
 ├── sessions/            # PTY session manager (creack/pty)
