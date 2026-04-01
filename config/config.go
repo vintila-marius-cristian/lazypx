@@ -8,6 +8,9 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Version is the application version.
+const Version = "v0.1.0"
+
 // Profile holds a single Proxmox connection profile.
 type Profile struct {
 	Name            string `mapstructure:"name"`
@@ -93,17 +96,17 @@ profiles:
   - name: default
     host: https://192.168.1.10:8006
     token_id: root@pam!lazypx
-    token_secret: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    token_secret: ""  # set via env LAZYPX_TOKEN_SECRET or OS keychain (recommended)
     tls_insecure: false
-    refresh_interval: 1
+    refresh_interval: 30
     production: false
 
   - name: prod
     host: https://pve-prod.example.com:8006
     token_id: root@pam!lazypx
-    token_secret: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    token_secret: ""  # set via env LAZYPX_TOKEN_SECRET or OS keychain (recommended)
     tls_insecure: false
-    refresh_interval: 15
+    refresh_interval: 30
     production: true
 `
 }

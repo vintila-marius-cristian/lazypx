@@ -1082,7 +1082,7 @@ func (m Model) renderHeader() string {
 		prodIndicator = StyleTitleProd.Render(" ● PRODUCTION")
 	}
 
-	left := StyleTitle.Render("  lazypx") + StyleSubtext.Render(" v0.1.0")
+	left := StyleTitle.Render("  lazypx") + StyleSubtext.Render(" "+config.Version)
 	right := profileStyle.Render(" ⎔ "+m.state.ProfileName) + prodIndicator
 
 	gap := l.TermW - lipgloss.Width(left) - lipgloss.Width(right) - 2

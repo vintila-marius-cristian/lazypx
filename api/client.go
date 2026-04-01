@@ -107,13 +107,6 @@ func (e *ProxmoxError) Error() string {
 	return fmt.Sprintf("proxmox API error %d: %s", e.StatusCode, e.Message)
 }
 
-func isClientError(err error) bool {
-	if e, ok := err.(*ProxmoxError); ok {
-		return e.StatusCode >= 400 && e.StatusCode < 500
-	}
-	return false
-}
-
 // do executes a single HTTP request.
 func (c *Client) do(ctx context.Context, method, path string, formBody map[string]string, out any) error {
 	reqURL := c.baseURL + path

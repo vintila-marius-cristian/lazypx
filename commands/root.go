@@ -138,7 +138,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("lazypx v0.1.0")
+			fmt.Println("lazypx " + config.Version)
 		},
 	}
 }
