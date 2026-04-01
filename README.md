@@ -1,8 +1,151 @@
 # lazypx
 
-A `lazygit`-style terminal UI for managing **Proxmox VE** clusters. Built in Go with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+A terminal UI for managing [Proxmox VE](https://www.proxmox.com/) clusters. Think [lazygit](https://github.com/jesseduffield/lazygit) but for Proxmox.
 
-Navigate your entire datacenter without leaving the terminal. Embedded PTY shells for each VM/CT stay alive as you move around — no tmux needed.
+Written in Go. No dependencies other than the binary itself. Works on macOS and Linux.
+
+## What it does
+
+- Shows your nodes, VMs, containers, and storage in a split-pane TUI
+- Lets you SSH into any VM/CT directly from the terminal — the shell stays alive as you navigate around
+- Start, stop, reboot, delete, migrate, and snapshot VMs with keyboard shortcuts
+- Shows Proxmox task progress in real time
+- Also works as a CLI for scripting: `lazypx vm start 105`, `lazypx ssh myvm`
+
+## What it doesn't do
+
+- No web UI — this is terminal only
+- No Windows support
+- Password auth for SSH requires [sshpass](https://linux.die.net/man/1/sshpass) to be installed separately
+- The embedded shell needs a real terminal (won't work in pipes or CI)
+
+## Requirements
+
+- A Proxmox VE host with API access enabled
+- An API token (Datacenter → Permissions → API Tokens in the Proxmox web UI)
+- [Go](https://go.dev/dl/) 1.25+ to build from source (or download a prebuilt binary)
+- [sshpass](https://linux.die.net/man/1/sshpass) only if you use password-based SSH (key auth doesn't need it)
+
+## Install
+
+### Download a prebuilt binary
+
+Grab the right file for your platform from [Releases](https://github.com/vintila-marius-cristian/lazypx/releases):
+
+| Platform | File |
+|----------|------|
+| macOS Apple Silicon (M1/M2/M3) | `lazypx-darwin-arm64` |
+| macOS Intel | `lazypx-darwin-amd64` |
+| Linux x86_64 | `lazypx-linux-amd64` |
+| Linux ARM64 | `lazypx-linux-arm64` |
+
+Then:
+
+```bash
+chmod +x lazypx-darwin-arm64
+sudo mv lazypx-darwin-arm64 /usr/local/bin/lazypx
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/vintila-marius-cristian/lazypx.git
+cd lazypx
+go build -o lazypx .
+sudo mv lazypx /usr/local/bin/
+```
+
+Verify:
+
+```bash
+lazypx version
+# lazypx v0.1.0
+```
+
+## First-time setup
+
+### 1. Create the config file
+
+lazypx looks for config at `~/.config/lazypx/config.yaml`. If the file doesn't exist, running `lazypx` will show you an example.
+
+Create it:
+
+```bash
+mkdir -p ~/.config/lazypx
+```
+
+Create `~/.config/lazypx/config.yaml`:
+
+```yaml
+default_profile: default
+
+profiles:
+  - name: default
+    host: https://192.168.1.10:8006
+    token_id: root@pam!mytoken
+    token_secret: "your-secret-here"
+    tls_insecure: true        # set to false if your Proxmox has a valid TLS cert
+    refresh_interval: 30      # how often to poll the cluster (seconds)
+    production: false         # shows a red header when true
+```
+
+Fields:
+- `host` — your Proxmox API URL (usually `https://<ip>:8006`)
+- `token_id` — the token ID you created in Proxmox (format: `user@realm!tokenname`)
+- `token_secret` — the secret Proxmox gave you when creating the token
+- `tls_insecure` — `true` to skip certificate verification (common with self-signed certs)
+- `refresh_interval` — how often to reload cluster data in the TUI (default: 30s)
+
+#### Using the OS keychain instead of plain text
+
+Instead of putting `token_secret` in the YAML file, you can store it in your OS keychain:
+
+```bash
+# macOS
+security add-generic-password -s lazypx -a "root@pam!mytoken" -w "your-secret"
+
+# Linux (needs secret-tool from libsecret-utils)
+secret-tool store --label="lazypx" service lazypx username "root@pam!mytoken"
+```
+
+Then leave `token_secret: ""` in the config file. lazypx will look it up automatically.
+
+### 2. (Optional) Set up SSH access
+
+The embedded shell (`e` key) and `lazypx ssh` command need to know how to reach your VMs. Create `~/.config/lazypx/ssh.yaml`:
+
+```yaml
+# Key-based auth (recommended)
+- id: 101
+  host: 192.168.1.50
+  user: admin
+  identity_file: ~/.ssh/id_ed25519
+
+# Password auth (needs sshpass installed)
+- id: 105
+  host: 10.0.20.198
+  user: packer
+  password: packer
+  port: 22
+
+# Minimal — uses your local username, port 22
+- id: 200
+  host: 192.168.1.100
+```
+
+`id` is the Proxmox VMID. Without this file, the `e` key and `lazypx ssh` won't work — you'll get a "no SSH mapping" error. All other TUI features (viewing VMs, start/stop, snapshots, etc.) work fine without it.
+
+### 3. Run it
+
+```bash
+lazypx
+```
+
+## Usage
+
+### TUI
+
+Run without arguments to open the interactive dashboard:
 
 ```
 ┌─────────────────┬──────────────────────────────────────┐
@@ -15,222 +158,205 @@ Navigate your entire datacenter without leaving the terminal. Embedded PTY shell
 └────────────────────────────────────────────────────────┘
 ```
 
-## Features
-
-- **Embedded SSH shell** — press `e` on any VM/CT to get a full PTY. Navigate away, it keeps running. Come back, it's still there.
-- **Relational filtering** — select a node and the VM/CT lists auto-filter to that node.
-- **Power actions** — start, stop, reboot, delete, migrate, backup with confirmation overlays.
-- **Live task log** — Proxmox async tasks stream alongside local shell events.
-- **Fuzzy search** — `/` to filter any resource instantly.
-- **CLI mode** — `lazypx ssh 105`, `lazypx vm start 105`, `lazypx snapshot create 105 backup` for scripting.
-- **OS keychain** — store your API token secret in macOS Keychain or Linux Secret Service instead of plain text.
-
-## Prerequisites
-
-- [Go](https://go.dev/dl/) 1.25+ (to build)
-- [sshpass](https://linux.die.net/man/1/sshpass) (only if using password-based SSH in `ssh.yaml`)
-- A Proxmox VE API token (Datacenter → Permissions → API Tokens)
-
-## Installation
-
-### Prebuilt binaries
-
-Download from [Releases](https://github.com/vintila-marius-cristian/lazypx/releases) for your platform:
-
-| Platform | File |
-|----------|------|
-| macOS Apple Silicon | `lazypx-darwin-arm64` |
-| macOS Intel | `lazypx-darwin-amd64` |
-| Linux x86_64 | `lazypx-linux-amd64` |
-| Linux ARM64 | `lazypx-linux-arm64` |
-
-```bash
-chmod +x lazypx-darwin-arm64
-sudo mv lazypx-darwin-arm64 /usr/local/bin/lazypx
-lazypx version
-```
-
-### Build from source
-
-Requires [Go](https://go.dev/dl/) 1.25+:
-
-```bash
-git clone <repo-url> lazypx
-cd lazypx
-go build -o lazypx .
-sudo mv lazypx /usr/local/bin/      # system-wide
-# or
-mv lazypx ~/bin/                     # user-local (make sure ~/bin is in PATH)
-```
-
-Verify it works:
-
-```bash
-lazypx version
-```
-
-## Configuration
-
-All config lives in `~/.config/lazypx/`. Nothing is stored in the codebase.
-
-### `~/.config/lazypx/config.yaml`
-
-```yaml
-profiles:
-  default:
-    host: "https://10.0.0.10:8006"
-    token_id: "root@pam!mytoken"
-    token_secret: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-    insecure: true       # skip TLS verification for self-signed certs
-    refresh_s: 30        # cache refresh interval in seconds
-active_profile: default
-```
-
-lazypx will create this file with an example config on first run if it doesn't exist.
-
-#### Storing the token secret in your OS keychain
-
-Instead of keeping `token_secret` in plain text, omit it from the config and store it in your keychain:
-
-```bash
-# macOS
-security add-generic-password -s lazypx -a "root@pam!mytoken" -w "your-secret"
-
-# Linux (requires secret-tool from libsecret)
-secret-tool store --label="lazypx" service lazypx username "root@pam!mytoken"
-```
-
-lazypx looks for the secret under service `lazypx` with the key matching your `token_id`.
-
-### `~/.config/lazypx/ssh.yaml`
-
-Maps VMIDs to SSH hosts. Required for the embedded shell (`e` key) and `lazypx ssh` CLI.
-
-```yaml
-# Password auth (requires sshpass)
-- id: 105
-  host: 10.0.20.198
-  user: packer
-  password: packer
-  port: 22
-
-# Key-based auth
-- id: 101
-  host: 192.168.1.50
-  user: admin
-  identity_file: ~/.ssh/id_ed25519
-
-# Minimal — uses current username, port 22
-- id: 200
-  host: 192.168.1.100
-```
-
-Passwords in `ssh.yaml` are passed to `sshpass` at process start and never appear in the TUI. For production, prefer key-based auth.
-
-## Usage
-
-### TUI
-
-```bash
-lazypx
-```
-
 #### Navigation
 
 | Key | Action |
 |-----|--------|
-| `j` / `k` / `↑` / `↓` | Move up/down |
-| `tab` / `shift+tab` | Cycle focus between sidebar panels |
-| `1` / `2` / `3` / `4` | Jump to Nodes / VMs / Containers / Storage |
-| `enter` | Inspect selected item |
-| `/` | Fuzzy search |
+| `j` / `↓` | Move down |
+| `k` / `↑` | Move up |
+| `1` | Jump to Nodes panel |
+| `2` | Jump to VMs panel |
+| `3` | Jump to Containers panel |
+| `4` | Jump to Storage panel |
+| `tab` | Next panel |
+| `shift+tab` | Previous panel |
+| `enter` | Inspect selected item (show details) |
+| `/` | Search / filter |
+| `f` | Force refresh cluster data |
+| `?` | Show/hide keybindings help |
+| `q` / `ctrl+c` | Quit |
 
-#### Actions
+#### VM/Container actions
+
+Select a VM or container, then:
 
 | Key | Action |
 |-----|--------|
 | `s` | Start |
-| `x` | Stop |
+| `x` | Stop (graceful shutdown) |
 | `r` | Reboot |
-| `d` | Delete (with confirmation) |
-| `m` | Migrate |
+| `d` | Delete (asks for confirmation) |
+| `m` | Migrate to another node |
 | `b` | Backup |
-| `f` | Force refresh cluster data |
+| `c` | Show snapshots |
+| `e` | Open embedded SSH shell |
+| `t` | Show all active shell sessions |
 
-#### Embedded Shell
+#### Embedded shell
 
-| Key | Action |
-|-----|--------|
-| `e` | Open shell for selected VM/CT |
-| `ctrl+q` | Unfocus shell (session keeps running) |
-| `ctrl+w` | Close shell view (session keeps running) |
-| `t` | Sessions picker — list all active sessions |
-
-When the shell is focused, all keypresses go to the PTY. Arrow keys, ctrl+c, ctrl+z, function keys all work.
-
-#### General
+When you press `e` on a VM/CT, a full PTY shell opens in the right pane. This is a real terminal — vim, htop, tmux inside the guest all work.
 
 | Key | Action |
 |-----|--------|
-| `?` | Toggle keybindings help |
-| `q` / `ctrl+c` | Quit |
+| `e` | Open or focus shell for selected VM/CT |
+| `ctrl+q` | Unfocus shell — go back to the left tree (shell keeps running) |
+| `ctrl+w` | Hide shell view (shell keeps running in background) |
+| `ctrl+u` | Scroll shell history up (when tree is focused) |
+| `ctrl+d` | Scroll shell history down (when tree is focused) |
+| `t` | Open sessions picker to switch between shells |
+
+When the shell is focused, all keyboard input goes to the remote machine. Arrow keys, ctrl+c, ctrl+z, alt+key, function keys — they all work.
+
+Shells are persistent: if you press `ctrl+w` to hide a shell and navigate away, the session keeps running. Press `e` again on the same VM to reattach. You can have shells open on multiple VMs simultaneously.
+
+#### Confirmations
+
+For destructive actions (delete, reboot), a confirmation prompt appears:
+
+| Key | Action |
+|-----|--------|
+| `y` / `enter` | Confirm |
+| `n` / `esc` / `q` | Cancel |
+
+#### Search
+
+Press `/` to filter the current list. Type to filter, `enter` to apply, `esc` to cancel, `backspace` to delete.
 
 ### CLI
 
+Use lazypx headlessly for scripts and automation:
+
 ```bash
-lazypx ssh 105                    # SSH by VMID
-lazypx ssh mgmt                   # SSH by VM name
+# SSH into a VM by ID or name
+lazypx ssh 105
+lazypx ssh myvm
 
-lazypx vm list                    # List VMs
-lazypx vm start <vmid>
-lazypx vm stop <vmid>
-lazypx vm reboot <vmid>
+# VM lifecycle
+lazypx vm list
+lazypx vm start 105
+lazypx vm stop 105
+lazypx vm reboot 105
 
-lazypx snapshot list <vmid>
-lazypx snapshot create <vmid> <name>
-lazypx snapshot rollback <vmid> <name>
-lazypx snapshot delete <vmid> <name>
+# Snapshots
+lazypx snapshot list 105
+lazypx snapshot create 105 "before-update"
+lazypx snapshot rollback 105 "before-update"
+lazypx snapshot delete 105 "before-update"
+
+# Cluster info
+lazypx cluster status
+lazypx cluster resources
+lazypx cluster resources -t vm    # filter by type
+
+# Nodes
+lazypx node list
+lazypx node status pve1
+
+# Access management
+lazypx access user list
+lazypx access user create newuser@pve --email user@example.com
+lazypx access user delete newuser@pve
+lazypx access group list
+lazypx access role list
+lazypx access acl list
+```
+
+All commands support `-p` to select a profile: `lazypx -p prod vm list`.
+
+## Configuration reference
+
+### Profiles
+
+The config file supports multiple profiles. Use `default_profile` to pick which one loads automatically, or pass `-p <name>` on the command line.
+
+```yaml
+default_profile: default
+
+profiles:
+  - name: default
+    host: https://192.168.1.10:8006
+    token_id: root@pam!mytoken
+    token_secret: "secret"
+    tls_insecure: true
+    refresh_interval: 30
+    production: false
+
+  - name: prod
+    host: https://pve-prod.example.com:8006
+    token_id: root@pam!lazypx
+    token_secret: ""
+    tls_insecure: false
+    refresh_interval: 60
+    production: true
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `name` | yes | — | Profile name (used with `-p`) |
+| `host` | yes | — | Proxmox API URL |
+| `token_id` | yes | — | API token ID (`user@realm!tokenname`) |
+| `token_secret` | yes* | — | API token secret (or use OS keychain) |
+| `tls_insecure` | no | `false` | Skip TLS certificate verification |
+| `refresh_interval` | no | `30` | Cluster data refresh interval (seconds) |
+| `production` | no | `false` | Shows red header bar when `true` |
+
+*`token_secret` can be empty if you store it in the OS keychain.
+
+### SSH config
+
+`~/.config/lazypx/ssh.yaml` maps Proxmox VMIDs to SSH endpoints:
+
+```yaml
+- id: 101                    # Proxmox VMID (required)
+  host: 192.168.1.50         # SSH host (required)
+  user: admin                # SSH user (optional, defaults to local username)
+  port: 22                   # SSH port (optional, defaults to 22)
+  identity_file: ~/.ssh/id   # Key file (optional)
+  password: secret           # Password (optional, needs sshpass)
 ```
 
 ## Security
 
-- No credentials in the codebase — config lives in `~/.config/lazypx/`.
-- API token secrets can be stored in your OS keychain instead of plain text.
-- SSH passwords are passed to `sshpass` at process start, never displayed.
-- Set `insecure: false` in config to enable TLS certificate verification.
+- Config files live in `~/.config/lazypx/` — they're never in the git repo.
+- Token secrets can be stored in macOS Keychain or Linux Secret Service instead of plain text.
+- SSH passwords are passed to `sshpass` at process start and never shown in the TUI.
+- Use key-based SSH auth (`identity_file`) instead of passwords when possible.
+- Set `tls_insecure: false` and use a valid certificate on your Proxmox host for production.
 
-## Architecture
+## Project structure
 
 ```
 lazypx/
-├── main.go              Entry point
-├── commands/            CLI subcommands (vm, ssh, snapshot)
-├── api/                 Proxmox API client (REST + token auth)
-├── audit/               Local audit log for TUI actions
-├── cache/               TTL-based cluster snapshot cache
-├── config/              Config + SSH yaml loaders, keyring integration
-├── sessions/            PTY session manager (creack/pty)
-├── state/               Shared AppState across all TUI models
-└── tui/
-    ├── app.go           Root Bubble Tea model, key routing, layout
-    ├── layout.go        Pane dimension calculation
-    ├── detail.go        Right pane detail view (VM/CT/Node/Storage)
-    ├── shell_pane.go    Embedded PTY terminal pane
-    ├── terminal.go      VT100/VT220 terminal emulator
-    ├── tasks.go         Bottom tasks & events pane
-    ├── help.go          Help, confirm, search overlays
-    ├── sessions_overlay.go  Sessions picker overlay
-    └── styles.go        Lip Gloss style definitions
+├── main.go                  Entry point
+├── api/                     Proxmox REST API client
+├── audit/                   Local audit log
+├── cache/                   Cluster data cache with TTL
+├── config/                  Config and SSH YAML loading, keyring
+├── commands/                CLI subcommands (vm, ssh, snapshot, etc.)
+├── sessions/                PTY session manager
+├── state/                   Shared application state
+└── tui/                     Bubble Tea UI
+    ├── app.go               Main model, key routing
+    ├── sidebar.go           Left panel (nodes, VMs, containers, storage)
+    ├── detail.go            Right panel (VM/CT/node/storage details)
+    ├── shell_pane.go        Embedded terminal pane
+    ├── terminal.go          VT100 terminal emulator
+    ├── tasks.go             Bottom panel (tasks and events)
+    ├── snapshots.go         Snapshot list overlay
+    ├── backups.go           Backup list overlay
+    ├── sessions_overlay.go  Session picker overlay
+    ├── help.go              Help, confirm, search overlays
+    ├── layout.go            Pane sizing
+    └── styles.go            Colors and styles
 ```
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes
-4. Run tests: `go test -race ./...`
-5. Open a Pull Request
+1. Fork and clone
+2. Make your changes
+3. Run `go test -race ./...` and `go vet ./...`
+4. Open a PR
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT
