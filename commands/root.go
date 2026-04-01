@@ -34,11 +34,15 @@ Use subcommands for direct CLI access.
 Configuration: ~/.config/lazypx/config.yaml`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(profileFlag)
-			if err != nil {
-				return err
+			// PersistentPreRunE already loaded config into cfgGlobal.
+			if cfgGlobal == nil {
+				cfg, err := config.Load(profileFlag)
+				if err != nil {
+					return err
+				}
+				cfgGlobal = cfg
 			}
-			return runTUI(cfg)
+			return runTUI(cfgGlobal)
 		},
 	}
 
