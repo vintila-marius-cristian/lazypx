@@ -112,6 +112,9 @@ type Model struct {
 	// VM extras debounce: avoid firing API calls on every cursor move.
 	lastExtrasVMID int
 	lastExtrasAt   time.Time
+
+	// Refresh guard: prevent overlapping refresh goroutines.
+	refreshing bool
 }
 
 // New creates the root TUI model.
@@ -174,6 +177,10 @@ func (m Model) loadCluster() tea.Cmd {
 }
 
 func (m Model) refreshCluster() tea.Cmd {
+	if m.refreshing {
+		return nil // skip if a refresh is already in flight
+	}
+	m.refreshing = true
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -337,11 +344,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case ClusterRefreshed:
+		m.refreshing = false
 		if msg.Snapshot.Error == nil {
 			m.state.Snapshot = msg.Snapshot
 			m.sidebar.Sync(m.state)
 			for _, e := range msg.Snapshot.Errors {
 				m.state.AddLocalEvent(e, "warn")
+			}
+		}
+		// Clean up shell panes whose processes have exited.
+		for key, sp := range m.shellPanes {
+			if sp.ended && key != m.state.ActiveShellKey {
+				delete(m.shellPanes, key)
 			}
 		}
 		d := time.Duration(m.cfg.RefreshInterval) * time.Second
