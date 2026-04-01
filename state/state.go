@@ -134,14 +134,14 @@ func (s *AppState) AddTask(upid, node, label string) int {
 
 // AppendTaskLog appends a log line to an active task by index.
 func (s *AppState) AppendTaskLog(idx int, line string) {
-	if idx < len(s.ActiveTasks) {
+	if idx >= 0 && idx < len(s.ActiveTasks) {
 		s.ActiveTasks[idx].Logs = append(s.ActiveTasks[idx].Logs, line)
 	}
 }
 
 // MarkTaskDone marks a task as done.
 func (s *AppState) MarkTaskDone(idx int, success bool) {
-	if idx < len(s.ActiveTasks) {
+	if idx >= 0 && idx < len(s.ActiveTasks) {
 		s.ActiveTasks[idx].Done = true
 		s.ActiveTasks[idx].Success = success
 	}

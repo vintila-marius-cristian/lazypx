@@ -41,6 +41,7 @@ func Close() {
 		_ = logFile.Sync()
 		_ = logFile.Close()
 		logFile = nil
+		logPath = ""
 	}
 }
 
