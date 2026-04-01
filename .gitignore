@@ -13,6 +13,7 @@ lazypx
 # test output
 *.test
 *.out
+coverage.html
 
 # never accidentally commit local config
 config.yaml
