@@ -517,12 +517,16 @@ func (m Model) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 
 	case "r":
 		m.state.ConfirmMsg = fmt.Sprintf("Reboot %s?", m.selectionLabel())
-		m.state.ConfirmAction = func() interface{} { return nil }
+		m.state.ConfirmAction = func() interface{} {
+			return m.actionReboot()
+		}
 		m.state.ConfirmVisible = true
 
 	case "d":
 		m.state.ConfirmMsg = fmt.Sprintf("DELETE %s? This cannot be undone!", m.selectionLabel())
-		m.state.ConfirmAction = func() interface{} { return nil }
+		m.state.ConfirmAction = func() interface{} {
+			return m.actionDelete()
+		}
 		m.state.ConfirmVisible = true
 
 	case "m":
@@ -679,6 +683,78 @@ func (m *Model) actionStop() tea.Cmd {
 				return ActionError{Err: err}
 			}
 			return TaskStartedMsg{UPID: upid, Node: ct.Node, Label: fmt.Sprintf("Stopping CT %d %s", ct.VMID, ct.Name)}
+		}
+	}
+	return nil
+}
+
+func (m *Model) actionReboot() tea.Cmd {
+	sel := m.state.Selected
+	client := m.apiClient
+	switch sel.Kind {
+	case state.KindVM:
+		if sel.VMStatus == nil {
+			return nil
+		}
+		vm := *sel.VMStatus
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			upid, err := client.RebootVM(ctx, vm.Node, vm.VMID)
+			if err != nil {
+				return ActionError{Err: err}
+			}
+			return TaskStartedMsg{UPID: upid, Node: vm.Node, Label: fmt.Sprintf("Rebooting VM %d %s", vm.VMID, vm.Name)}
+		}
+	case state.KindContainer:
+		if sel.CTStatus == nil {
+			return nil
+		}
+		ct := *sel.CTStatus
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			upid, err := client.RebootCT(ctx, ct.Node, ct.VMID)
+			if err != nil {
+				return ActionError{Err: err}
+			}
+			return TaskStartedMsg{UPID: upid, Node: ct.Node, Label: fmt.Sprintf("Rebooting CT %d %s", ct.VMID, ct.Name)}
+		}
+	}
+	return nil
+}
+
+func (m *Model) actionDelete() tea.Cmd {
+	sel := m.state.Selected
+	client := m.apiClient
+	switch sel.Kind {
+	case state.KindVM:
+		if sel.VMStatus == nil {
+			return nil
+		}
+		vm := *sel.VMStatus
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			upid, err := client.DeleteVM(ctx, vm.Node, vm.VMID)
+			if err != nil {
+				return ActionError{Err: err}
+			}
+			return TaskStartedMsg{UPID: upid, Node: vm.Node, Label: fmt.Sprintf("Deleting VM %d %s", vm.VMID, vm.Name)}
+		}
+	case state.KindContainer:
+		if sel.CTStatus == nil {
+			return nil
+		}
+		ct := *sel.CTStatus
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			upid, err := client.DeleteCT(ctx, ct.Node, ct.VMID)
+			if err != nil {
+				return ActionError{Err: err}
+			}
+			return TaskStartedMsg{UPID: upid, Node: ct.Node, Label: fmt.Sprintf("Deleting CT %d %s", ct.VMID, ct.Name)}
 		}
 	}
 	return nil

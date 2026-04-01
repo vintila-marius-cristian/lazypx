@@ -2,9 +2,9 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -216,9 +216,9 @@ func newACLCmd(cfg *config.Config) *cobra.Command {
 	return cmd
 }
 
-// printJSON is a shared helper (already in vm.go via encoding/json, redeclare if not visible)
+// printJSON encodes v as indented JSON to stdout.
 func printJSON(v any) error {
-	// avoid import cycle — inline here if needed
-	_ = strings.NewReader("") // keep strings import
-	return nil                // replaced by json encoding in vm.go's printVMs
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
