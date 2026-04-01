@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -115,18 +116,18 @@ func isClientError(err error) bool {
 
 // do executes a single HTTP request.
 func (c *Client) do(ctx context.Context, method, path string, formBody map[string]string, out any) error {
-	url := c.baseURL + path
+	reqURL := c.baseURL + path
 
 	var bodyReader io.Reader
 	if len(formBody) > 0 {
-		parts := make([]string, 0, len(formBody))
+		vals := url.Values{}
 		for k, v := range formBody {
-			parts = append(parts, fmt.Sprintf("%s=%s", k, v))
+			vals.Set(k, v)
 		}
-		bodyReader = strings.NewReader(strings.Join(parts, "&"))
+		bodyReader = strings.NewReader(vals.Encode())
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, bodyReader)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}

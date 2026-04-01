@@ -3,6 +3,7 @@ package api
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 )
 
@@ -70,14 +71,21 @@ func IsRetryable(err error) bool {
 // RedactMessage strips potential credential material from an error message.
 // Used before surfacing errors in the TUI or logs.
 func RedactMessage(msg string) string {
-	// Redact anything that looks like a UUID token secret
-	return redactPattern(msg)
+	msg = redactSecrets(msg)
+	if len(msg) > 500 {
+		return msg[:500] + " …[truncated]"
+	}
+	return msg
 }
 
-func redactPattern(s string) string {
-	// Simple heuristic: redact long hex/UUID strings that might be secrets
-	if len(s) > 500 {
-		return s[:500] + " …[truncated]"
-	}
+// uuidPattern matches strings that look like UUIDs or token secrets.
+var uuidPattern = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+
+// tokenPattern matches PVEAPIToken header values that may leak into error bodies.
+var tokenPattern = regexp.MustCompile(`PVEAPIToken=\S+`)
+
+func redactSecrets(s string) string {
+	s = uuidPattern.ReplaceAllString(s, "[REDACTED-UUID]")
+	s = tokenPattern.ReplaceAllString(s, "PVEAPIToken=[REDACTED]")
 	return s
 }
