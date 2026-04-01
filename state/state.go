@@ -4,6 +4,8 @@ package state
 import (
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"lazypx/api"
 	"lazypx/cache"
 )
@@ -90,7 +92,7 @@ type AppState struct {
 	HelpVisible    bool
 	ConfirmVisible bool
 	ConfirmMsg     string
-	ConfirmAction  func() interface{}
+	ConfirmAction  func() tea.Cmd
 
 	SnapshotsVisible bool
 	BackupsVisible   bool

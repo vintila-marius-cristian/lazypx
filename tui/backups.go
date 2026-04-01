@@ -135,12 +135,12 @@ func (m BackupsModel) Update(msg tea.Msg) (BackupsModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *BackupsModel) actionCreate() func() interface{} {
+func (m *BackupsModel) actionCreate() func() tea.Cmd {
 	node := m.targetNode()
 	vmid := m.targetVMID()
 	client := m.client
 
-	return func() interface{} {
+	return func() tea.Cmd {
 		m.st.BackupsVisible = false // close overlay synchronously
 		var cmd tea.Cmd = func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

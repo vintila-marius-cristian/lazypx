@@ -251,7 +251,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if sel := m.sessionsOverlay.Selected(); sel != nil {
 					m.state.ConfirmMsg = fmt.Sprintf("Terminate session %s?", sel.Key)
 					keyToKill := sel.Key
-					m.state.ConfirmAction = func() interface{} {
+					m.state.ConfirmAction = func() tea.Cmd {
 						m.sessionsMgr.CloseSession(keyToKill)
 						m.sessionsOverlay.Refresh()
 						return nil
@@ -545,21 +545,21 @@ func (m Model) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 
 	case "x":
 		m.state.ConfirmMsg = fmt.Sprintf("Stop %s?", m.selectionLabel())
-		m.state.ConfirmAction = func() interface{} {
+		m.state.ConfirmAction = func() tea.Cmd {
 			return m.actionStop()
 		}
 		m.state.ConfirmVisible = true
 
 	case "r":
 		m.state.ConfirmMsg = fmt.Sprintf("Reboot %s?", m.selectionLabel())
-		m.state.ConfirmAction = func() interface{} {
+		m.state.ConfirmAction = func() tea.Cmd {
 			return m.actionReboot()
 		}
 		m.state.ConfirmVisible = true
 
 	case "d":
 		m.state.ConfirmMsg = fmt.Sprintf("DELETE %s? This cannot be undone!", m.selectionLabel())
-		m.state.ConfirmAction = func() interface{} {
+		m.state.ConfirmAction = func() tea.Cmd {
 			return m.actionDelete()
 		}
 		m.state.ConfirmVisible = true
@@ -574,7 +574,7 @@ func (m Model) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 				})
 			} else {
 				m.state.ConfirmMsg = fmt.Sprintf("Migrate VM %d to %s?", vm.VMID, target)
-				m.state.ConfirmAction = func() interface{} {
+				m.state.ConfirmAction = func() tea.Cmd {
 					return m.actionMigrate(vm.Node, vm.VMID, target)
 				}
 				m.state.ConfirmVisible = true
@@ -632,15 +632,14 @@ type TaskStartedMsg struct {
 
 func (m Model) handleConfirmKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "y", "enter": // removed "Y"
+	case "y", "enter":
 		if m.state.ConfirmAction != nil {
-			cmdIace := m.state.ConfirmAction()
-			if cmd, ok := cmdIace.(tea.Cmd); ok && cmd != nil {
+			if cmd := m.state.ConfirmAction(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		}
 		m.state.ConfirmVisible = false
-	case "n", "esc", "q": // removed "N"
+	case "n", "esc", "q":
 		m.state.ConfirmVisible = false
 	}
 	return m, tea.Batch(cmds...)

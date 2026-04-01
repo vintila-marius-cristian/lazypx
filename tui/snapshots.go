@@ -158,13 +158,13 @@ func (m SnapshotsModel) Update(msg tea.Msg) (SnapshotsModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *SnapshotsModel) actionRollback(snapname string) func() interface{} {
+func (m *SnapshotsModel) actionRollback(snapname string) func() tea.Cmd {
 	node := m.targetNode()
 	vmid := m.targetVMID()
 	kind := m.targetKind()
 	client := m.client
 
-	return func() interface{} {
+	return func() tea.Cmd {
 		m.st.SnapshotsVisible = false
 		var cmd tea.Cmd = func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -179,13 +179,13 @@ func (m *SnapshotsModel) actionRollback(snapname string) func() interface{} {
 	}
 }
 
-func (m *SnapshotsModel) actionDelete(snapname string) func() interface{} {
+func (m *SnapshotsModel) actionDelete(snapname string) func() tea.Cmd {
 	node := m.targetNode()
 	vmid := m.targetVMID()
 	kind := m.targetKind()
 	client := m.client
 
-	return func() interface{} {
+	return func() tea.Cmd {
 		m.st.SnapshotsVisible = false
 		var cmd tea.Cmd = func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -200,14 +200,14 @@ func (m *SnapshotsModel) actionDelete(snapname string) func() interface{} {
 	}
 }
 
-func (m *SnapshotsModel) actionCreate() func() interface{} {
+func (m *SnapshotsModel) actionCreate() func() tea.Cmd {
 	node := m.targetNode()
 	vmid := m.targetVMID()
 	kind := m.targetKind()
 	client := m.client
 	snapname := fmt.Sprintf("auto_%d", time.Now().Unix())
 
-	return func() interface{} {
+	return func() tea.Cmd {
 		m.st.SnapshotsVisible = false
 		var cmd tea.Cmd = func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
