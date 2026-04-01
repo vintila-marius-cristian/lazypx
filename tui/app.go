@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"lazypx/api"
+	"lazypx/audit"
 	"lazypx/cache"
 	"lazypx/config"
 	"lazypx/sessions"
@@ -128,6 +130,9 @@ func New(apiClient *api.Client, clusterCache *cache.Cache, cfg *config.Profile) 
 	ssh, _ := config.LoadSSH() // ignore error, map will be empty
 
 	mgr := sessions.New(profileName)
+
+	// Initialize audit log — best effort, never blocks startup.
+	audit.Init(config.ConfigDir())
 
 	return Model{
 		state:           st,
@@ -545,7 +550,21 @@ func (m Model) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 		m.state.ConfirmVisible = true
 
 	case "m":
-		// TODO: migrate dialog
+		if m.state.Selected.Kind == state.KindVM && m.state.Selected.VMStatus != nil {
+			vm := m.state.Selected.VMStatus
+			target := m.findMigrationTarget(vm.Node)
+			if target == "" {
+				cmds = append(cmds, func() tea.Msg {
+					return ActionError{Err: fmt.Errorf("no target node available for migration")}
+				})
+			} else {
+				m.state.ConfirmMsg = fmt.Sprintf("Migrate VM %d to %s?", vm.VMID, target)
+				m.state.ConfirmAction = func() interface{} {
+					return m.actionMigrate(vm.Node, vm.VMID, target)
+				}
+				m.state.ConfirmVisible = true
+			}
+		}
 	case "b":
 		if m.state.Selected.Kind == state.KindVM || m.state.Selected.Kind == state.KindContainer {
 			m.state.BackupsVisible = true
@@ -640,6 +659,7 @@ func (m *Model) actionStart() tea.Cmd {
 			return nil
 		}
 		vm := *sel.VMStatus
+		m.auditLog("START", fmt.Sprintf("vm:%d", vm.VMID))
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
@@ -654,6 +674,7 @@ func (m *Model) actionStart() tea.Cmd {
 			return nil
 		}
 		ct := *sel.CTStatus
+		m.auditLog("START", fmt.Sprintf("ct:%d", ct.VMID))
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
@@ -676,6 +697,7 @@ func (m *Model) actionStop() tea.Cmd {
 			return nil
 		}
 		vm := *sel.VMStatus
+		m.auditLog("STOP", fmt.Sprintf("vm:%d", vm.VMID))
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
@@ -690,6 +712,7 @@ func (m *Model) actionStop() tea.Cmd {
 			return nil
 		}
 		ct := *sel.CTStatus
+		m.auditLog("STOP", fmt.Sprintf("ct:%d", ct.VMID))
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
@@ -712,6 +735,7 @@ func (m *Model) actionReboot() tea.Cmd {
 			return nil
 		}
 		vm := *sel.VMStatus
+		m.auditLog("REBOOT", fmt.Sprintf("vm:%d", vm.VMID))
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
@@ -726,6 +750,7 @@ func (m *Model) actionReboot() tea.Cmd {
 			return nil
 		}
 		ct := *sel.CTStatus
+		m.auditLog("REBOOT", fmt.Sprintf("ct:%d", ct.VMID))
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
@@ -748,6 +773,7 @@ func (m *Model) actionDelete() tea.Cmd {
 			return nil
 		}
 		vm := *sel.VMStatus
+		m.auditLog("DELETE", fmt.Sprintf("vm:%d", vm.VMID))
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
@@ -762,6 +788,7 @@ func (m *Model) actionDelete() tea.Cmd {
 			return nil
 		}
 		ct := *sel.CTStatus
+		m.auditLog("DELETE", fmt.Sprintf("ct:%d", ct.VMID))
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
@@ -773,6 +800,30 @@ func (m *Model) actionDelete() tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// findMigrationTarget returns the first online node that is not currentNode.
+func (m *Model) findMigrationTarget(currentNode string) string {
+	for _, n := range m.state.Snapshot.Nodes {
+		if n.Node != currentNode && n.Status == "online" {
+			return n.Node
+		}
+	}
+	return ""
+}
+
+func (m *Model) actionMigrate(node string, vmid int, target string) tea.Cmd {
+	client := m.apiClient
+	m.auditLog("MIGRATE", fmt.Sprintf("vm:%d to %s", vmid, target))
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		upid, err := client.MigrateVM(ctx, node, vmid, target, true)
+		if err != nil {
+			return ActionError{Err: err}
+		}
+		return TaskStartedMsg{UPID: upid, Node: node, Label: fmt.Sprintf("Migrating VM %d → %s", vmid, target)}
+	}
 }
 
 // actionShell opens an embedded PTY shell for the selected VM/CT.
@@ -939,6 +990,28 @@ func (m *Model) selectionLabel() string {
 		return "node " + m.state.Selected.NodeName
 	}
 	return "selection"
+}
+
+// auditUser extracts the user portion from a token_id like "root@pam!mytoken".
+func (m *Model) auditUser() string {
+	if m.cfg == nil || m.cfg.TokenID == "" {
+		return "unknown"
+	}
+	// token_id format: "user@realm!tokenname"
+	id := m.cfg.TokenID
+	if idx := strings.Index(id, "!"); idx > 0 {
+		return id[:idx]
+	}
+	return id
+}
+
+// auditLog writes an audit entry. Never blocks the primary operation.
+func (m *Model) auditLog(action, resource string) {
+	profile := "default"
+	if m.cfg != nil && m.cfg.Name != "" {
+		profile = m.cfg.Name
+	}
+	audit.Log(profile, m.auditUser(), action, resource)
 }
 
 // ── View ──────────────────────────────────────────────────────────────────────
