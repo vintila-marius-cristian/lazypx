@@ -33,35 +33,34 @@ Navigate your entire datacenter without leaving the terminal. Embedded PTY shell
 
 ## Installation
 
+### Prebuilt binaries
+
+Download from [Releases](https://github.com/vintila-marius-cristian/lazypx/releases) for your platform:
+
+| Platform | File |
+|----------|------|
+| macOS Apple Silicon | `lazypx-darwin-arm64` |
+| macOS Intel | `lazypx-darwin-amd64` |
+| Linux x86_64 | `lazypx-linux-amd64` |
+| Linux ARM64 | `lazypx-linux-arm64` |
+
+```bash
+chmod +x lazypx-darwin-arm64
+sudo mv lazypx-darwin-arm64 /usr/local/bin/lazypx
+lazypx version
+```
+
+### Build from source
+
+Requires [Go](https://go.dev/dl/) 1.25+:
+
 ```bash
 git clone <repo-url> lazypx
 cd lazypx
 go build -o lazypx .
-```
-
-This produces a `lazypx` binary in the current directory. You can either:
-
-**Option A — move it somewhere in your PATH:**
-
-```bash
-# System-wide
-sudo mv lazypx /usr/local/bin/
-
-# Or user-local (make sure ~/bin is in your PATH)
-mkdir -p ~/bin
-mv lazypx ~/bin/
-```
-
-**Option B — symlink it:**
-
-```bash
-ln -sf "$(pwd)/lazypx" /usr/local/bin/lazypx
-```
-
-**Option C — run it in place:**
-
-```bash
-./lazypx
+sudo mv lazypx /usr/local/bin/      # system-wide
+# or
+mv lazypx ~/bin/                     # user-local (make sure ~/bin is in PATH)
 ```
 
 Verify it works:
