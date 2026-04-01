@@ -169,7 +169,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) loadCluster() tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutStandard)
 		defer cancel()
 		snap := m.cache.Refresh(ctx)
 		return ClusterLoaded{Snapshot: snap}
@@ -182,7 +182,7 @@ func (m Model) refreshCluster() tea.Cmd {
 	}
 	m.refreshing = true
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutStandard)
 		defer cancel()
 		snap := m.cache.Refresh(ctx)
 		return ClusterRefreshed{Snapshot: snap}
@@ -454,7 +454,7 @@ type VMExtrasLoadedMsg struct {
 
 func (m Model) loadVMExtrasCmd(node string, vmid int) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutQuick)
 		defer cancel()
 
 		cfg, _ := m.apiClient.GetVMConfig(ctx, node, vmid)
@@ -675,7 +675,7 @@ func (m *Model) actionStart() tea.Cmd {
 		vm := *sel.VMStatus
 		m.auditLog("START", fmt.Sprintf("vm:%d", vm.VMID))
 		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutLong)
 			defer cancel()
 			upid, err := client.StartVM(ctx, vm.Node, vm.VMID)
 			if err != nil {
@@ -690,7 +690,7 @@ func (m *Model) actionStart() tea.Cmd {
 		ct := *sel.CTStatus
 		m.auditLog("START", fmt.Sprintf("ct:%d", ct.VMID))
 		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutLong)
 			defer cancel()
 			upid, err := client.StartCT(ctx, ct.Node, ct.VMID)
 			if err != nil {
@@ -713,7 +713,7 @@ func (m *Model) actionStop() tea.Cmd {
 		vm := *sel.VMStatus
 		m.auditLog("STOP", fmt.Sprintf("vm:%d", vm.VMID))
 		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutLong)
 			defer cancel()
 			upid, err := client.StopVM(ctx, vm.Node, vm.VMID)
 			if err != nil {
@@ -728,7 +728,7 @@ func (m *Model) actionStop() tea.Cmd {
 		ct := *sel.CTStatus
 		m.auditLog("STOP", fmt.Sprintf("ct:%d", ct.VMID))
 		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutLong)
 			defer cancel()
 			upid, err := client.StopCT(ctx, ct.Node, ct.VMID)
 			if err != nil {
@@ -751,7 +751,7 @@ func (m *Model) actionReboot() tea.Cmd {
 		vm := *sel.VMStatus
 		m.auditLog("REBOOT", fmt.Sprintf("vm:%d", vm.VMID))
 		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutLong)
 			defer cancel()
 			upid, err := client.RebootVM(ctx, vm.Node, vm.VMID)
 			if err != nil {
@@ -766,7 +766,7 @@ func (m *Model) actionReboot() tea.Cmd {
 		ct := *sel.CTStatus
 		m.auditLog("REBOOT", fmt.Sprintf("ct:%d", ct.VMID))
 		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutLong)
 			defer cancel()
 			upid, err := client.RebootCT(ctx, ct.Node, ct.VMID)
 			if err != nil {
@@ -789,7 +789,7 @@ func (m *Model) actionDelete() tea.Cmd {
 		vm := *sel.VMStatus
 		m.auditLog("DELETE", fmt.Sprintf("vm:%d", vm.VMID))
 		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutLong)
 			defer cancel()
 			upid, err := client.DeleteVM(ctx, vm.Node, vm.VMID)
 			if err != nil {
@@ -804,7 +804,7 @@ func (m *Model) actionDelete() tea.Cmd {
 		ct := *sel.CTStatus
 		m.auditLog("DELETE", fmt.Sprintf("ct:%d", ct.VMID))
 		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutLong)
 			defer cancel()
 			upid, err := client.DeleteCT(ctx, ct.Node, ct.VMID)
 			if err != nil {
@@ -830,7 +830,7 @@ func (m *Model) actionMigrate(node string, vmid int, target string) tea.Cmd {
 	client := m.apiClient
 	m.auditLog("MIGRATE", fmt.Sprintf("vm:%d to %s", vmid, target))
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutMigration)
 		defer cancel()
 		upid, err := client.MigrateVM(ctx, node, vmid, target, true)
 		if err != nil {

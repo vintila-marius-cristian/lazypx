@@ -78,7 +78,7 @@ func (m *BackupsModel) Load() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutStandard)
 			defer cancel()
 			backs, err := client.GetBackups(ctx, node, vmid)
 			return BackupsLoadedMsg{Backups: backs, Err: err}
@@ -143,7 +143,7 @@ func (m *BackupsModel) actionCreate() func() tea.Cmd {
 	return func() tea.Cmd {
 		m.st.BackupsVisible = false // close overlay synchronously
 		var cmd tea.Cmd = func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutLong)
 			defer cancel()
 			// Empty storage triggers auto-detect
 			upid, err := client.CreateBackup(ctx, node, vmid, "")

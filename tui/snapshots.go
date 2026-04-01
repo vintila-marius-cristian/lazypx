@@ -82,7 +82,7 @@ func (m *SnapshotsModel) Load() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutStandard)
 			defer cancel()
 			snaps, err := client.GetSnapshots(ctx, node, vmid, kind)
 			return SnapshotsLoadedMsg{Snapshots: snaps, Err: err}
@@ -167,7 +167,7 @@ func (m *SnapshotsModel) actionRollback(snapname string) func() tea.Cmd {
 	return func() tea.Cmd {
 		m.st.SnapshotsVisible = false
 		var cmd tea.Cmd = func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutLong)
 			defer cancel()
 			upid, err := client.RollbackSnapshot(ctx, node, vmid, kind, snapname)
 			if err != nil {
@@ -188,7 +188,7 @@ func (m *SnapshotsModel) actionDelete(snapname string) func() tea.Cmd {
 	return func() tea.Cmd {
 		m.st.SnapshotsVisible = false
 		var cmd tea.Cmd = func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutLong)
 			defer cancel()
 			upid, err := client.DeleteSnapshot(ctx, node, vmid, kind, snapname)
 			if err != nil {
@@ -210,7 +210,7 @@ func (m *SnapshotsModel) actionCreate() func() tea.Cmd {
 	return func() tea.Cmd {
 		m.st.SnapshotsVisible = false
 		var cmd tea.Cmd = func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), api.TimeoutLong)
 			defer cancel()
 			upid, err := client.CreateSnapshot(ctx, node, vmid, kind, snapname, "lazypx auto snapshot")
 			if err != nil {
