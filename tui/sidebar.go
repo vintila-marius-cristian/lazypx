@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -151,12 +152,37 @@ func (m *SidebarModel) Sync(st *state.AppState) {
 	m.UpdateSelection()
 }
 
-// ApplyFilter filters items across all lists (not fully implemented yet, just sync)
+// ApplyFilter filters items across all lists by case-insensitive substring match.
 func (m *SidebarModel) ApplyFilter(query string, st *state.AppState) {
-	// For now, simpler: just clear query
 	if query == "" {
 		m.Sync(st)
+		return
 	}
+
+	q := strings.ToLower(query)
+
+	filterItems := func(items []ListItem) []ListItem {
+		var filtered []ListItem
+		for _, item := range items {
+			label := strings.ToLower(item.Label)
+			name := strings.ToLower(item.Name)
+			if strings.Contains(label, q) || strings.Contains(name, q) {
+				filtered = append(filtered, item)
+			}
+		}
+		return filtered
+	}
+
+	m.nodesList.Items = filterItems(m.nodesList.Items)
+	m.nodesList.clampCursor()
+	m.vmsList.Items = filterItems(m.vmsList.Items)
+	m.vmsList.clampCursor()
+	m.ctsList.Items = filterItems(m.ctsList.Items)
+	m.ctsList.clampCursor()
+	m.storageList.Items = filterItems(m.storageList.Items)
+	m.storageList.clampCursor()
+
+	m.UpdateSelection()
 }
 
 func (m *SidebarModel) ActiveList() *ListPane {

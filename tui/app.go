@@ -106,6 +106,10 @@ type Model struct {
 	shellPanes map[string]*ShellPane
 	spinner    spinner.Model
 	layout     Layout // centralized layout dimensions
+
+	// VM extras debounce: avoid firing API calls on every cursor move.
+	lastExtrasVMID int
+	lastExtrasAt   time.Time
 }
 
 // New creates the root TUI model.
@@ -391,10 +395,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tasks.Sync(m.state)
 	}
 
-	// Check if selection changed to a new VM.
+	// Check if selection changed to a new VM — debounce to avoid API calls on every j/k.
 	if m.state.Selected.Kind == state.KindVM {
 		if prevKind != state.KindVM || prevVMID != m.state.Selected.VMID {
-			cmds = append(cmds, m.loadVMExtrasCmd(m.state.Selected.NodeName, m.state.Selected.VMID))
+			now := time.Now()
+			if m.lastExtrasVMID != m.state.Selected.VMID || now.Sub(m.lastExtrasAt) > 2*time.Second {
+				m.lastExtrasVMID = m.state.Selected.VMID
+				m.lastExtrasAt = now
+				cmds = append(cmds, m.loadVMExtrasCmd(m.state.Selected.NodeName, m.state.Selected.VMID))
+			}
 		}
 	}
 
