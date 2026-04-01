@@ -4,6 +4,7 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ type ClusterSnapshot struct {
 	Tasks      []api.Task                        // global cluster tasks
 	FetchedAt  time.Time
 	Error      error
+	Errors     []string // per-node fetch warnings (non-fatal)
 }
 
 // IsEmpty returns true if no nodes have been loaded.
@@ -93,6 +95,7 @@ func (c *Cache) Refresh(ctx context.Context) ClusterSnapshot {
 		containers []api.CTStatus
 		storage    []api.StorageStatus
 		network    []api.NetworkInterface
+		errors     []string
 	}
 
 	results := make(chan nodeResult, len(nodes))
@@ -107,19 +110,35 @@ func (c *Cache) Refresh(ctx context.Context) ClusterSnapshot {
 			innerWg.Add(4)
 			go func() {
 				defer innerWg.Done()
-				res.vms, _ = c.client.GetVMs(ctx, node.Node)
+				var err error
+				res.vms, err = c.client.GetVMs(ctx, node.Node)
+				if err != nil {
+					res.errors = append(res.errors, fmt.Sprintf("node %s vms: %v", node.Node, err))
+				}
 			}()
 			go func() {
 				defer innerWg.Done()
-				res.containers, _ = c.client.GetContainers(ctx, node.Node)
+				var err error
+				res.containers, err = c.client.GetContainers(ctx, node.Node)
+				if err != nil {
+					res.errors = append(res.errors, fmt.Sprintf("node %s containers: %v", node.Node, err))
+				}
 			}()
 			go func() {
 				defer innerWg.Done()
-				res.storage, _ = c.client.GetStorage(ctx, node.Node)
+				var err error
+				res.storage, err = c.client.GetStorage(ctx, node.Node)
+				if err != nil {
+					res.errors = append(res.errors, fmt.Sprintf("node %s storage: %v", node.Node, err))
+				}
 			}()
 			go func() {
 				defer innerWg.Done()
-				res.network, _ = c.client.GetNetworkInterfaces(ctx, node.Node)
+				var err error
+				res.network, err = c.client.GetNetworkInterfaces(ctx, node.Node)
+				if err != nil {
+					res.errors = append(res.errors, fmt.Sprintf("node %s network: %v", node.Node, err))
+				}
 			}()
 			innerWg.Wait()
 			results <- res
@@ -159,6 +178,7 @@ func (c *Cache) Refresh(ctx context.Context) ClusterSnapshot {
 		snap.Containers[res.node] = res.containers
 		snap.Storage[res.node] = res.storage
 		snap.Network[res.node] = res.network
+		snap.Errors = append(snap.Errors, res.errors...)
 	}
 
 	// Safe to read globalTasks now — wg.Wait() completed (close(results) fired),

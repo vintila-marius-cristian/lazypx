@@ -316,6 +316,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state.Error = ""
 			m.state.Snapshot = msg.Snapshot
 			m.sidebar.Sync(m.state)
+			for _, e := range msg.Snapshot.Errors {
+				m.state.AddLocalEvent(e, "warn")
+			}
 		}
 		d := time.Duration(m.cfg.RefreshInterval) * time.Second
 		cmds = append(cmds, tickRefresh(d))
@@ -332,6 +335,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Snapshot.Error == nil {
 			m.state.Snapshot = msg.Snapshot
 			m.sidebar.Sync(m.state)
+			for _, e := range msg.Snapshot.Errors {
+				m.state.AddLocalEvent(e, "warn")
+			}
 		}
 		d := time.Duration(m.cfg.RefreshInterval) * time.Second
 		cmds = append(cmds, tickRefresh(d))

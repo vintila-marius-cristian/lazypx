@@ -40,6 +40,7 @@ func (c *Client) WatchTask(ctx context.Context, node, upid string, ch chan<- Tas
 	defer close(ch)
 	linesSeen := 0
 	pollInterval := 500 * time.Millisecond
+	consecutiveErrors := 0
 
 	for {
 		select {
@@ -50,16 +51,23 @@ func (c *Client) WatchTask(ctx context.Context, node, upid string, ch chan<- Tas
 
 		// Fetch new log lines
 		lines, err := c.GetTaskLog(ctx, node, upid, linesSeen, 50)
-		if err == nil {
-			for _, l := range lines {
-				select {
-				case ch <- l:
-				case <-ctx.Done():
-					return
-				}
+		if err != nil {
+			consecutiveErrors++
+			if consecutiveErrors >= 5 {
+				return // too many errors, give up
 			}
-			linesSeen += len(lines)
+			continue
 		}
+		consecutiveErrors = 0
+
+		for _, l := range lines {
+			select {
+			case ch <- l:
+			case <-ctx.Done():
+				return
+			}
+		}
+		linesSeen += len(lines)
 
 		// Check if task is done
 		status, err := c.GetTaskStatus(ctx, node, upid)
