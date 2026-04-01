@@ -45,28 +45,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 | Package | Before | After |
 |---------|--------|-------|
-| api | 17% | 82.6% |
+| api | 17% | 99.8% |
 | audit | 0% | 100% |
 | cache | 80% | 95.5% |
-| commands | 0% | 22.8% |
+| commands | 0% | 98.5% |
 | config | 21% | 92.9% |
-| sessions | 13% | 63.9% |
+| sessions | 13% | 95.9% |
 | state | 0% | 100% |
-| tui | 17% | 34.2% |
+| tui | 17% | 47.5% |
 
 New test files added:
 
 | File | Coverage areas |
 |------|---------------|
 | `api/api_test.go` | Mock server routing, class errors, retries, timeout, redaction |
+| `api/api_extra_test.go` | Error paths for all API functions, BackupVM, WatchTask edge cases |
 | `audit/audit_test.go` | 100% — Open, Log, Close, read back, restart |
-| `cache/cache_extra_test.go` | AllVMs, AllContainers, IsEmpty, error collection, edge cases |
-| `commands/commands_test.go` | Root cmd structure, version, clientFromConfig, printVMs, printJSON |
+| `cache/cache_extra_test.go` | AllVMs, AllContainers, error collection, edge cases |
+| `commands/commands_test.go` | Root cmd structure, version, clientFromConfig |
+| `commands/commands_extra_test.go` | All CLI subcommand constructors and handlers |
 | `config/config_test.go` | Load, ExampleConfig, EnsureConfigDir, SSH hosts, keyring |
 | `sessions/manager_test.go` | Open/Close/List/IsAlive, race detection, PTY lifecycle |
+| `sessions/manager_extra_test.go` | PTYAttacher methods, error paths |
+| `sessions/manager_interactive_test.go` | Full interactive shell loop (excluded under -race) |
 | `state/state_test.go` | 100% — UpdateCache, Tasks, ConfirmAction, state transitions |
 | `tui/components_test.go` | StatusDot, StatusStyle, truncate, Sidebar, Detail, Tasks panes |
 | `tui/help_test.go` | Help overlay rendering |
+| `tui/tui_extra_test.go` | Terminal escape sequences, utility functions, sessions overlay |
+
+### CI/CD
+
+- **`.github/workflows/ci.yml`** — GitHub Actions pipeline with lint (`go vet`), build, tests with `-race`, and coverage upload
 
 ### Documentation
 
@@ -97,7 +106,9 @@ New test files added:
 - `tui/backups.go` — `ConfirmAction` type fix
 - `tui/components_test.go` — **NEW** Component and pane tests
 - `tui/help_test.go` — **NEW** Help overlay tests
+- `tui/tui_extra_test.go` — **NEW** Terminal escape sequences, utility functions
 - `docs/evaluation.md` — **NEW** Full application evaluation table
+- `.github/workflows/ci.yml` — **NEW** GitHub Actions CI pipeline
 
 ---
 
