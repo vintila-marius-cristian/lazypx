@@ -1,0 +1,20 @@
+# compiled binary
+lazypx
+
+# macOS
+.DS_Store
+
+# editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# test output
+*.test
+*.out
+
+# never accidentally commit local config
+config.yaml
+ssh.yaml
+*.secret

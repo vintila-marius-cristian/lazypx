@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -33,6 +34,7 @@ type session struct {
 	ptm       *os.File // pty master
 	startedAt time.Time
 	attached  bool
+	exited    atomic.Bool // set by background goroutine after Wait()
 	mu        sync.Mutex
 }
 
@@ -68,10 +70,8 @@ func (m *Manager) OpenSession(key string, cmdName string, args []string) error {
 
 	// Clean up if process died
 	if s, exists := m.sessions[key]; exists {
-		if s.cmd.ProcessState == nil && s.cmd.Process != nil {
-			// Process is still running (no ProcessState yet) -> wait, check if it responded to kill
-			// A better check is to see if we can read wait state, but since we run it in background
-			// we just rely on ProcessState being set by the background Wait() goroutine.
+		if !s.exited.Load() {
+			// Process is still running -> return nil
 			return nil
 		}
 		delete(m.sessions, key)
@@ -96,10 +96,14 @@ func (m *Manager) OpenSession(key string, cmdName string, args []string) error {
 
 	m.sessions[key] = sess
 
-	// Monitor for exit in the background
-	go func(k string, cmd *exec.Cmd) {
-		cmd.Wait() // Sets ProcessState when done
-	}(key, c)
+	// Monitor for exit in the background.
+	// We do NOT hold sess.mu during Wait() to avoid lock ordering issues.
+	// The atomic flag is set after Wait() returns so ListSessions/IsAlive
+	// see a consistent "exited" state without touching cmd.ProcessState.
+	go func(s *session) {
+		s.cmd.Wait()
+		s.exited.Store(true)
+	}(sess)
 
 	return nil
 }
@@ -150,20 +154,20 @@ func (m *Manager) ListSessions() []SessionInfo {
 
 	var out []SessionInfo
 	for _, s := range sessions {
-		s.mu.Lock()
 		status := "running"
-		if s.cmd.ProcessState != nil {
+		if s.exited.Load() {
 			status = "exited"
 		}
-		info := SessionInfo{
+		s.mu.Lock()
+		attached := s.attached
+		s.mu.Unlock()
+		out = append(out, SessionInfo{
 			Key:       s.key,
 			VMID:      s.vmid,
 			Status:    status,
 			StartedAt: s.startedAt,
-			Attached:  s.attached,
-		}
-		s.mu.Unlock()
-		out = append(out, info)
+			Attached:  attached,
+		})
 	}
 	return out
 }
@@ -202,7 +206,7 @@ func (p PTYAttacher) Run() error {
 	}()
 
 	// Check if already dead
-	if s.cmd.ProcessState != nil {
+	if s.exited.Load() {
 		return fmt.Errorf("session process has exited")
 	}
 
@@ -287,12 +291,12 @@ func (m *Manager) ResizePTY(key string, cols, rows int) error {
 // IsAlive reports whether the session process is still running.
 func (m *Manager) IsAlive(key string) bool {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	s, ok := m.sessions[key]
+	m.mu.Unlock()
 	if !ok {
 		return false
 	}
-	return s.cmd.ProcessState == nil
+	return !s.exited.Load()
 }
 
 // sanitize replaces non-alphanumeric characters in profile names.
