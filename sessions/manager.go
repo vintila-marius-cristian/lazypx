@@ -124,24 +124,46 @@ func (m *Manager) CloseSession(key string) error {
 	return nil
 }
 
+// CloseAll kills all sessions. Called on app quit.
+func (m *Manager) CloseAll() {
+	m.mu.Lock()
+	sessions := m.sessions
+	m.sessions = make(map[string]*session)
+	m.mu.Unlock()
+
+	for _, s := range sessions {
+		if s.cmd.Process != nil {
+			s.cmd.Process.Kill()
+		}
+		s.ptm.Close()
+	}
+}
+
 // ListSessions returns all active sessions.
 func (m *Manager) ListSessions() []SessionInfo {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	sessions := make([]*session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		sessions = append(sessions, s)
+	}
+	m.mu.Unlock()
 
 	var out []SessionInfo
-	for _, s := range m.sessions {
+	for _, s := range sessions {
+		s.mu.Lock()
 		status := "running"
 		if s.cmd.ProcessState != nil {
 			status = "exited"
 		}
-		out = append(out, SessionInfo{
+		info := SessionInfo{
 			Key:       s.key,
 			VMID:      s.vmid,
 			Status:    status,
 			StartedAt: s.startedAt,
 			Attached:  s.attached,
-		})
+		}
+		s.mu.Unlock()
+		out = append(out, info)
 	}
 	return out
 }

@@ -472,6 +472,7 @@ func (m Model) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "q", "ctrl+c":
+		m.sessionsMgr.CloseAll()
 		return m, tea.Quit
 
 	case "?":
